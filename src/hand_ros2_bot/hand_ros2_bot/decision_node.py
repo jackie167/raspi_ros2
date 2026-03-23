@@ -3,6 +3,7 @@ from rclpy.node import Node
 from std_msgs.msg import String
 from geometry_msgs.msg import Twist
 
+
 class DecisionNode(Node):
     def __init__(self):
         super().__init__('decision_node')
@@ -15,12 +16,10 @@ class DecisionNode(Node):
         )
 
         self.pub = self.create_publisher(Twist, 'cmd_vel', 10)
-
         self.get_logger().info('Decision node started')
 
     def callback(self, msg):
-        cmd = msg.data
-
+        cmd = msg.data.strip().lower()
         twist = Twist()
 
         if cmd == 'forward':
@@ -34,6 +33,9 @@ class DecisionNode(Node):
         elif cmd == 'stop':
             twist.linear.x = 0.0
             twist.angular.z = 0.0
+        else:
+            self.get_logger().warning(f'Unknown command: {msg.data}')
+            return
 
         self.pub.publish(twist)
         self.get_logger().info(f'Publish cmd_vel: {cmd}')

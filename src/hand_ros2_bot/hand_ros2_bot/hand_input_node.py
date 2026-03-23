@@ -6,9 +6,9 @@ from std_msgs.msg import String
 class HandInputNode(Node):
     def __init__(self):
         super().__init__('hand_input_node')
-        self.publisher_ = self.create_publisher(String, '/hand_command', 10)
+        self.publisher_ = self.create_publisher(String, 'cmd_input', 10)
         self.timer = self.create_timer(2.0, self.publish_command)
-        self.commands = ['LEFT', 'RIGHT', 'STOP']
+        self.commands = ['left', 'right', 'stop']
         self.index = 0
 
     def publish_command(self):

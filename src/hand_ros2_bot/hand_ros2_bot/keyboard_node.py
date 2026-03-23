@@ -5,6 +5,7 @@ import sys
 import termios
 import tty
 
+
 class KeyboardNode(Node):
     def __init__(self):
         super().__init__('keyboard_node')
@@ -22,6 +23,13 @@ class KeyboardNode(Node):
         return key
 
     def run(self):
+        if not sys.stdin.isatty():
+            self.get_logger().error(
+                'No interactive TTY detected. '
+                'Run with a real terminal or use launch arg use_keyboard:=false.'
+            )
+            return
+
         while rclpy.ok():
             key = self.get_key()
 
@@ -42,6 +50,8 @@ class KeyboardNode(Node):
 
             self.publisher_.publish(msg)
             self.get_logger().info(f'Publish: {msg.data}')
+
+
 def main(args=None):
     rclpy.init(args=args)
     node = KeyboardNode()
@@ -52,4 +62,4 @@ def main(args=None):
         pass
 
     node.destroy_node()
-    rclpy.shutdown()    
+    rclpy.shutdown()
