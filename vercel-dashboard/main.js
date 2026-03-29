@@ -228,7 +228,6 @@ function renderMoistureChart() {
   for (let i = 0; i < series.length; i++) {
     const point = series[i];
     if (point.value === null) {
-      started = false;
       continue;
     }
     const x = left + i * step;
