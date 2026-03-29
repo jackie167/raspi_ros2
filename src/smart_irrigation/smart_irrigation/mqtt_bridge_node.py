@@ -13,10 +13,16 @@ class MqttBridgeNode(Node):
 
         self.declare_parameter('broker_host', 'test.mosquitto.org')
         self.declare_parameter('broker_port', 1883)
+        self.declare_parameter('broker_username', '')
+        self.declare_parameter('broker_password', '')
+        self.declare_parameter('broker_use_tls', False)
         self.declare_parameter('topic_prefix', 'smart_irrigation/dinhthi')
 
         self.broker_host = self.get_parameter('broker_host').value
         self.broker_port = int(self.get_parameter('broker_port').value)
+        self.broker_username = self.get_parameter('broker_username').value
+        self.broker_password = self.get_parameter('broker_password').value
+        self.broker_use_tls = bool(self.get_parameter('broker_use_tls').value)
 
         prefix = str(self.get_parameter('topic_prefix').value).strip('/')
         self.mqtt_sensor_topic = f'{prefix}/data/sensor'
@@ -24,11 +30,9 @@ class MqttBridgeNode(Node):
         self.mqtt_pump_state_topic = f'{prefix}/data/pump_state'
         self.mqtt_config_test_topic = f'{prefix}/data/config_test'
 
-        # ROS publishers for inbound MQTT messages.
         self.sensor_pub = self.create_publisher(String, 'irrigation/sensor_data', 10)
         self.config_test_pub = self.create_publisher(String, 'irrigation/esp32_config_test', 10)
 
-        # ROS subscribers for outbound MQTT messages.
         self.pump_cmd_sub = self.create_subscription(
             String,
             'irrigation/pump_command',
@@ -51,13 +55,17 @@ class MqttBridgeNode(Node):
             port=self.broker_port,
             logger=self.get_logger(),
             on_message=self.on_mqtt_message,
+            username=self.broker_username,
+            password=self.broker_password,
+            use_tls=self.broker_use_tls,
         )
         self.client.connect_and_start()
         self.client.subscribe(self.mqtt_sensor_topic)
         self.client.subscribe(self.mqtt_config_test_topic)
 
+        tls_mode = 'TLS' if self.broker_use_tls else 'plain'
         self.get_logger().info(
-            f'MQTT bridge ready. Broker={self.broker_host}:{self.broker_port}. '
+            f'MQTT bridge ready. Broker={self.broker_host}:{self.broker_port} ({tls_mode}). '
             f'IN: {self.mqtt_sensor_topic}, {self.mqtt_config_test_topic} | '
             f'OUT: {self.mqtt_cmd_topic}, {self.mqtt_pump_state_topic}'
         )

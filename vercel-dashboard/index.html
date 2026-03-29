@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Irrigation Dashboard</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="wrap">
+    <h1>Smart Irrigation Dashboard</h1>
+
+    <section class="card">
+      <h2>Broker</h2>
+      <label>WSS URL</label>
+      <input id="brokerUrl" value="wss://YOUR_HIVEMQ_CLUSTER.s1.eu.hivemq.cloud:8884/mqtt" />
+
+      <label>Username</label>
+      <input id="brokerUser" placeholder="hivemq username" />
+
+      <label>Password</label>
+      <input id="brokerPass" type="password" placeholder="hivemq password" />
+
+      <label>Topic Prefix</label>
+      <input id="topicPrefix" value="smart_irrigation/dinhthi" />
+
+      <button id="btnConnect">Connect</button>
+      <p id="status">Disconnected</p>
+    </section>
+
+    <section class="card">
+      <h2>Live Data</h2>
+      <p><strong>Soil moisture:</strong> <span id="moisture">-</span>%</p>
+      <p><strong>Temperature:</strong> <span id="temperature">-</span> C</p>
+      <p><strong>Humidity:</strong> <span id="humidity">-</span>%</p>
+      <p><strong>Pump state:</strong> <span id="pumpState">-</span></p>
+      <pre id="raw">No data</pre>
+    </section>
+
+    <section class="card">
+      <h2>Pump Control</h2>
+      <button id="btnOn" class="ok">Pump ON</button>
+      <button id="btnOff" class="bad">Pump OFF</button>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="./main.js"></script>
+</body>
+</html>

@@ -9,6 +9,10 @@ def generate_launch_description():
     use_mqtt = LaunchConfiguration('use_mqtt')
     use_serial = LaunchConfiguration('use_serial')
     mqtt_broker_host = LaunchConfiguration('mqtt_broker_host')
+    mqtt_broker_port = LaunchConfiguration('mqtt_broker_port')
+    mqtt_broker_username = LaunchConfiguration('mqtt_broker_username')
+    mqtt_broker_password = LaunchConfiguration('mqtt_broker_password')
+    mqtt_broker_use_tls = LaunchConfiguration('mqtt_broker_use_tls')
     topic_prefix = LaunchConfiguration('topic_prefix')
     serial_port = LaunchConfiguration('serial_port')
 
@@ -16,6 +20,10 @@ def generate_launch_description():
         DeclareLaunchArgument('use_mqtt', default_value='true'),
         DeclareLaunchArgument('use_serial', default_value='false'),
         DeclareLaunchArgument('mqtt_broker_host', default_value='test.mosquitto.org'),
+        DeclareLaunchArgument('mqtt_broker_port', default_value='1883'),
+        DeclareLaunchArgument('mqtt_broker_username', default_value=''),
+        DeclareLaunchArgument('mqtt_broker_password', default_value=''),
+        DeclareLaunchArgument('mqtt_broker_use_tls', default_value='false'),
         DeclareLaunchArgument('topic_prefix', default_value='smart_irrigation/dinhthi'),
         DeclareLaunchArgument('serial_port', default_value='/dev/ttyUSB0'),
         Node(package='smart_irrigation', executable='config_node', output='screen'),
@@ -36,6 +44,10 @@ def generate_launch_description():
             parameters=[
                 {
                     'broker_host': mqtt_broker_host,
+                    'broker_port': mqtt_broker_port,
+                    'broker_username': mqtt_broker_username,
+                    'broker_password': mqtt_broker_password,
+                    'broker_use_tls': mqtt_broker_use_tls,
                     'topic_prefix': topic_prefix,
                 }
             ],
