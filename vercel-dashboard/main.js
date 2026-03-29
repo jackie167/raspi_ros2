@@ -10,7 +10,6 @@ const moistureEl = document.getElementById('moisture');
 const tempEl = document.getElementById('temperature');
 const humiEl = document.getElementById('humidity');
 const pumpStateEl = document.getElementById('pumpState');
-const rawEl = document.getElementById('raw');
 
 const brokerUserEl = document.getElementById('brokerUser');
 const brokerPassEl = document.getElementById('brokerPass');
@@ -125,7 +124,6 @@ function onMessage(topicName, payloadBytes) {
     setPumpState(extractPumpState(payload));
   }
 
-  rawEl.textContent = '[' + topicName + '] ' + payload;
 }
 
 function connect() {
