@@ -257,6 +257,34 @@ function renderMoistureChart() {
   moistureChartMetaEl.textContent = 'Last MQTT hourly avg: ' + last.value.toFixed(1) + '% at ' + last.label;
 }
 
+
+function applyLiveSensorToChart(moisture, tsSec) {
+  const value = Number(moisture);
+  if (!Number.isFinite(value)) return;
+
+  const ts = Number(tsSec);
+  const sec = Number.isFinite(ts) ? ts : Math.floor(Date.now() / 1000);
+  const hourEpoch = Math.floor(sec / 3600);
+
+  const idx = hourlyHistory.findIndex((item) => item.hour === hourEpoch);
+  if (idx >= 0) {
+    const current = hourlyHistory[idx];
+    const currentCount = Number.isFinite(Number(current.count)) ? Number(current.count) : 0;
+    const nextCount = currentCount + 1;
+    const nextAvg = ((Number(current.avg) * currentCount) + value) / nextCount;
+    hourlyHistory[idx] = { hour: hourEpoch, avg: nextAvg, count: nextCount };
+  } else {
+    hourlyHistory.push({ hour: hourEpoch, avg: value, count: 1 });
+  }
+
+  hourlyHistory.sort((a, b) => a.hour - b.hour);
+  const nowHourEpoch = Math.floor(Date.now() / 3600000);
+  const minHourEpoch = nowHourEpoch - (HISTORY_HOURS - 1);
+  hourlyHistory = hourlyHistory.filter((x) => x.hour >= minHourEpoch && x.hour <= nowHourEpoch);
+
+  renderMoistureChart();
+}
+
 function parseHistoryMessage(topicName, payload) {
   const historyPrefix = topic('history/soil_moisture/hourly/') ;
   if (!topicName.startsWith(historyPrefix)) return;
@@ -287,6 +315,7 @@ function onMessage(topicName, payloadBytes) {
       moistureEl.textContent = Number.isFinite(moisture) ? String(moisture) : '-';
       tempEl.textContent = String(data.temperature ?? '-');
       humiEl.textContent = String(data.humidity ?? '-');
+      applyLiveSensorToChart(moisture, data.ts);
     } catch {
       // Ignore parse errors.
     }
