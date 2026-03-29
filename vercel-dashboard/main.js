@@ -10,6 +10,7 @@ const moistureEl = document.getElementById('moisture');
 const tempEl = document.getElementById('temperature');
 const humiEl = document.getElementById('humidity');
 const pumpStateEl = document.getElementById('pumpState');
+const pumpAckEl = document.getElementById('pumpAck');
 const moistureChartEl = document.getElementById('moistureChart');
 const moistureChartMetaEl = document.getElementById('moistureChartMeta');
 
@@ -69,6 +70,11 @@ function saveConfig() {
   } else {
     localStorage.removeItem(STORAGE_KEY);
   }
+}
+
+function setPumpAck(value) {
+  if (!pumpAckEl) return;
+  pumpAckEl.textContent = String(value);
 }
 
 function setPumpState(state) {
@@ -326,8 +332,10 @@ function onMessage(topicName, payloadBytes) {
     setPumpState(ackState);
     if (pendingPumpCommand && (ackState === 'ON' || ackState === 'OFF')) {
       if (ackState === pendingPumpCommand) {
+        setPumpAck('true');
         setStatus('ESP confirmed pump: ' + ackState);
       } else {
+        setPumpAck('false');
         setStatus('ESP state mismatch: expected ' + pendingPumpCommand + ', got ' + ackState);
       }
       pendingPumpCommand = null;
@@ -395,6 +403,7 @@ function publishPump(value) {
 
   client.publish(topic('cmd/pump'), value, { qos: 0, retain: false });
   pendingPumpCommand = value;
+  setPumpAck('pending');
   setStatus('Command sent: ' + value + ' (waiting ESP ack)');
 }
 
