@@ -1,6 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.conditions import IfCondition, UnlessCondition
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -13,7 +13,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_mqtt', default_value='true'),
-        DeclareLaunchArgument('use_serial', default_value='true'),
+        DeclareLaunchArgument('use_serial', default_value='false'),
         DeclareLaunchArgument('mqtt_broker_host', default_value='127.0.0.1'),
         DeclareLaunchArgument('serial_port', default_value='/dev/ttyUSB0'),
         Node(package='smart_irrigation', executable='config_node', output='screen'),
@@ -25,12 +25,6 @@ def generate_launch_description():
             output='screen',
             condition=IfCondition(use_serial),
             parameters=[{'serial_port': serial_port}],
-        ),
-        Node(
-            package='smart_irrigation',
-            executable='sensor_node',
-            output='screen',
-            condition=UnlessCondition(use_serial),
         ),
         Node(
             package='smart_irrigation',
