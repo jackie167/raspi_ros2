@@ -4,6 +4,7 @@ let client = null;
 const BROKER_WSS_URL = 'wss://b005c9ecb8674930857a11ff36fcd93c.s1.eu.hivemq.cloud:8884/mqtt';
 const TOPIC_PREFIX = 'smart_irrigation/dinhthi';
 
+const brokerCardEl = document.getElementById('brokerCard');
 const statusEl = document.getElementById('status');
 const moistureEl = document.getElementById('moisture');
 const tempEl = document.getElementById('temperature');
@@ -20,6 +21,14 @@ const STORAGE_KEY = 'smart_irrigation_dashboard_cfg_v2';
 
 function setStatus(text) {
   statusEl.textContent = text;
+}
+
+function setBrokerCardVisible(visible) {
+  if (visible) {
+    brokerCardEl.classList.remove('hidden');
+  } else {
+    brokerCardEl.classList.add('hidden');
+  }
 }
 
 function topic(name) {
@@ -98,24 +107,36 @@ function connect() {
   };
 
   setStatus('Connecting...');
+  setBrokerCardVisible(true);
   client = mqtt.connect(BROKER_WSS_URL, options);
 
   client.on('connect', () => {
     setStatus('Connected');
+    setBrokerCardVisible(false);
     client.subscribe(topic('data/sensor'));
     client.subscribe(topic('data/pump_state'));
     client.subscribe(topic('data/config_test'));
   });
 
   client.on('message', onMessage);
-  client.on('reconnect', () => setStatus('Reconnecting...'));
-  client.on('error', (err) => setStatus('Error: ' + err.message));
-  client.on('close', () => setStatus('Disconnected'));
+  client.on('reconnect', () => {
+    setStatus('Reconnecting...');
+    setBrokerCardVisible(true);
+  });
+  client.on('error', (err) => {
+    setStatus('Error: ' + err.message);
+    setBrokerCardVisible(true);
+  });
+  client.on('close', () => {
+    setStatus('Disconnected');
+    setBrokerCardVisible(true);
+  });
 }
 
 function publishPump(value) {
   if (!client || !client.connected) {
     setStatus('Not connected');
+    setBrokerCardVisible(true);
     return;
   }
 

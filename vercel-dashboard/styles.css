@@ -26,6 +26,15 @@ body {
   border-radius: 14px;
   padding: 16px;
 }
+.hidden {
+  display: none !important;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 8px;
+}
 h1, h2 { margin: 0 0 12px; }
 label { display: block; margin: 8px 0 4px; color: var(--muted); font-size: 14px; }
 input {
