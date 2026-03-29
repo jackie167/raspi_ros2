@@ -20,7 +20,6 @@ const autoConnectEl = document.getElementById('autoConnect');
 
 const STORAGE_KEY = 'smart_irrigation_dashboard_cfg_v2';
 const LAST_PUMP_STATE_KEY = 'smart_irrigation_last_pump_state_v1';
-const HOURLY_MOISTURE_KEY = 'smart_irrigation_hourly_moisture_v1';
 const HISTORY_HOURS = 24;
 
 let hourlyHistory = [];
@@ -116,72 +115,52 @@ function hourStartMs(tsMs) {
   return d.getTime();
 }
 
-function loadHourlyHistory() {
-  try {
-    const raw = localStorage.getItem(HOURLY_MOISTURE_KEY);
-    if (!raw) {
-      hourlyHistory = [];
-      return;
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      hourlyHistory = [];
-      return;
-    }
-
-    const nowHour = hourStartMs(Date.now());
-    const minHour = nowHour - (HISTORY_HOURS - 1) * 3600000;
-
-    hourlyHistory = parsed
-      .filter((item) => Number.isFinite(item.hour) && Number.isFinite(item.avg) && Number.isFinite(item.count))
-      .filter((item) => item.hour >= minHour && item.hour <= nowHour)
-      .sort((a, b) => a.hour - b.hour);
-  } catch {
-    hourlyHistory = [];
-  }
+function resetHourlyHistory() {
+  hourlyHistory = [];
+  renderMoistureChart();
 }
 
-function saveHourlyHistory() {
-  localStorage.setItem(HOURLY_MOISTURE_KEY, JSON.stringify(hourlyHistory));
-}
+function upsertHourlyHistoryEntry(hourEpoch, avgValue, countValue) {
+  const hour = Number(hourEpoch);
+  const avg = Number(avgValue);
+  const count = Number(countValue);
+  if (!Number.isFinite(hour) || !Number.isFinite(avg)) return;
 
-function upsertHourlyMoisture(moisture, tsMs) {
-  const value = Number(moisture);
-  if (!Number.isFinite(value)) return;
-
-  const hour = hourStartMs(tsMs || Date.now());
   const idx = hourlyHistory.findIndex((item) => item.hour === hour);
+  const item = {
+    hour,
+    avg,
+    count: Number.isFinite(count) ? count : 1,
+  };
 
   if (idx >= 0) {
-    const current = hourlyHistory[idx];
-    const nextCount = current.count + 1;
-    const nextAvg = (current.avg * current.count + value) / nextCount;
-    hourlyHistory[idx] = { hour, avg: nextAvg, count: nextCount };
+    hourlyHistory[idx] = item;
   } else {
-    hourlyHistory.push({ hour, avg: value, count: 1 });
+    hourlyHistory.push(item);
   }
 
   hourlyHistory.sort((a, b) => a.hour - b.hour);
-  const nowHour = hourStartMs(Date.now());
-  const minHour = nowHour - (HISTORY_HOURS - 1) * 3600000;
-  hourlyHistory = hourlyHistory.filter((item) => item.hour >= minHour && item.hour <= nowHour);
+  const nowHourEpoch = Math.floor(Date.now() / 3600000);
+  const minHourEpoch = nowHourEpoch - (HISTORY_HOURS - 1);
+  hourlyHistory = hourlyHistory.filter((x) => x.hour >= minHourEpoch && x.hour <= nowHourEpoch);
 
-  saveHourlyHistory();
   renderMoistureChart();
 }
 
 function buildChartSeries() {
-  const nowHour = hourStartMs(Date.now());
-  const minHour = nowHour - (HISTORY_HOURS - 1) * 3600000;
-  const map = new Map(hourlyHistory.map((item) => [item.hour, item.avg]));
+  const nowHourMs = hourStartMs(Date.now());
+  const minHourMs = nowHourMs - (HISTORY_HOURS - 1) * 3600000;
+  const valueByHourMs = new Map(
+    hourlyHistory.map((item) => [item.hour * 3600000, item.avg]),
+  );
 
   const points = [];
   for (let i = 0; i < HISTORY_HOURS; i++) {
-    const hour = minHour + i * 3600000;
+    const hourMs = minHourMs + i * 3600000;
     points.push({
-      hour,
-      label: String(new Date(hour).getHours()).padStart(2, '0') + ':00',
-      value: map.has(hour) ? map.get(hour) : null,
+      hourMs,
+      label: String(new Date(hourMs).getHours()).padStart(2, '0') + ':00',
+      value: valueByHourMs.has(hourMs) ? valueByHourMs.get(hourMs) : null,
     });
   }
   return points;
@@ -269,12 +248,32 @@ function renderMoistureChart() {
 
   const hasData = series.some((p) => p.value !== null);
   if (!hasData) {
-    moistureChartMetaEl.textContent = 'No sensor data in the last 24 hours yet.';
+    moistureChartMetaEl.textContent = 'Waiting hourly history from MQTT...';
     return;
   }
 
   const last = [...series].reverse().find((p) => p.value !== null);
-  moistureChartMetaEl.textContent = 'Last hourly avg: ' + last.value.toFixed(1) + '% at ' + last.label;
+  moistureChartMetaEl.textContent = 'Last MQTT hourly avg: ' + last.value.toFixed(1) + '% at ' + last.label;
+}
+
+function parseHistoryMessage(topicName, payload) {
+  const historyPrefix = topic('history/soil_moisture/hourly/') ;
+  if (!topicName.startsWith(historyPrefix)) return;
+
+  const hourFromTopic = Number(topicName.slice(historyPrefix.length));
+
+  try {
+    const data = JSON.parse(payload);
+    const hourEpoch = Number.isFinite(Number(data.hour_epoch)) ? Number(data.hour_epoch) : hourFromTopic;
+    const avg = data.avg_soil_moisture;
+    const count = data.count;
+    upsertHourlyHistoryEntry(hourEpoch, avg, count);
+    return;
+  } catch {
+    // Fallback below if payload is non-JSON.
+  }
+
+  upsertHourlyHistoryEntry(hourFromTopic, Number(payload), 1);
 }
 
 function onMessage(topicName, payloadBytes) {
@@ -287,9 +286,6 @@ function onMessage(topicName, payloadBytes) {
       moistureEl.textContent = Number.isFinite(moisture) ? String(moisture) : '-';
       tempEl.textContent = String(data.temperature ?? '-');
       humiEl.textContent = String(data.humidity ?? '-');
-
-      const tsMs = Number.isFinite(Number(data.ts)) ? Number(data.ts) * 1000 : Date.now();
-      upsertHourlyMoisture(moisture, tsMs);
     } catch {
       // Ignore parse errors.
     }
@@ -298,6 +294,8 @@ function onMessage(topicName, payloadBytes) {
   if (topicName.endsWith('/data/pump_state')) {
     setPumpState(extractPumpState(payload));
   }
+
+  parseHistoryMessage(topicName, payload);
 }
 
 function connect() {
@@ -327,9 +325,11 @@ function connect() {
   client.on('connect', () => {
     setStatus('Connected');
     setBrokerCardVisible(false);
+    resetHourlyHistory();
     client.subscribe(topic('data/sensor'));
     client.subscribe(topic('data/pump_state'));
     client.subscribe(topic('data/config_test'));
+    client.subscribe(topic('history/soil_moisture/hourly/+'));
   });
 
   client.on('message', onMessage);
@@ -365,7 +365,6 @@ window.addEventListener('resize', renderMoistureChart);
 
 loadConfig();
 loadLastPumpState();
-loadHourlyHistory();
 renderMoistureChart();
 if (autoConnectEl.checked) {
   connect();

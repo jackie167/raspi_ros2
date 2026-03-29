@@ -1,4 +1,6 @@
+import json
 import threading
+import time
 
 import rclpy
 from rclpy.node import Node
@@ -29,6 +31,7 @@ class MqttBridgeNode(Node):
         self.mqtt_cmd_topic = f'{prefix}/cmd/pump'
         self.mqtt_pump_state_topic = f'{prefix}/data/pump_state'
         self.mqtt_config_test_topic = f'{prefix}/data/config_test'
+        self.mqtt_hourly_history_prefix = f'{prefix}/history/soil_moisture/hourly'
 
         self.sensor_pub = self.create_publisher(String, 'irrigation/sensor_data', 10)
         self.config_test_pub = self.create_publisher(String, 'irrigation/esp32_config_test', 10)
@@ -48,6 +51,7 @@ class MqttBridgeNode(Node):
 
         self._inbound_queue = []
         self._lock = threading.Lock()
+        self._hourly_stats = {}
         self.flush_timer = self.create_timer(0.05, self.flush_queue)
 
         self.client = MqttClientWrapper(
@@ -67,12 +71,56 @@ class MqttBridgeNode(Node):
         self.get_logger().info(
             f'MQTT bridge ready. Broker={self.broker_host}:{self.broker_port} ({tls_mode}). '
             f'IN: {self.mqtt_sensor_topic}, {self.mqtt_config_test_topic} | '
-            f'OUT: {self.mqtt_cmd_topic}, {self.mqtt_pump_state_topic}'
+            f'OUT: {self.mqtt_cmd_topic}, {self.mqtt_pump_state_topic}, {self.mqtt_hourly_history_prefix}/+'
         )
 
     def on_mqtt_message(self, topic, payload):
         with self._lock:
             self._inbound_queue.append((topic, payload))
+
+    def _publish_hourly_soil_history(self, sensor_payload):
+        try:
+            data = json.loads(sensor_payload)
+        except json.JSONDecodeError:
+            return
+
+        moisture = data.get('soil_moisture')
+        try:
+            moisture = float(moisture)
+        except (TypeError, ValueError):
+            return
+
+        ts = data.get('ts')
+        try:
+            ts = int(float(ts)) if ts is not None else int(time.time())
+        except (TypeError, ValueError):
+            ts = int(time.time())
+
+        hour_epoch = ts // 3600
+        stat = self._hourly_stats.get(hour_epoch, {'sum': 0.0, 'count': 0})
+        stat['sum'] += moisture
+        stat['count'] += 1
+        self._hourly_stats[hour_epoch] = stat
+
+        avg = stat['sum'] / stat['count']
+        history_payload = json.dumps(
+            {
+                'hour_epoch': int(hour_epoch),
+                'hour_start_unix': int(hour_epoch * 3600),
+                'avg_soil_moisture': round(avg, 2),
+                'count': int(stat['count']),
+            },
+            separators=(',', ':'),
+        )
+
+        history_topic = f'{self.mqtt_hourly_history_prefix}/{int(hour_epoch)}'
+        self.client.publish(history_topic, history_payload, retain=True)
+
+        # Keep small in-memory aggregation window (48h) to avoid unbounded growth.
+        min_hour = (int(time.time()) // 3600) - 48
+        self._hourly_stats = {
+            k: v for k, v in self._hourly_stats.items() if k >= min_hour
+        }
 
     def flush_queue(self):
         item = None
@@ -92,6 +140,7 @@ class MqttBridgeNode(Node):
                 return
 
             self.sensor_pub.publish(msg)
+            self._publish_hourly_soil_history(msg.data)
             self.get_logger().info('MQTT -> ROS irrigation/sensor_data')
             return
 
