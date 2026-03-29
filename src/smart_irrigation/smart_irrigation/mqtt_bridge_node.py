@@ -11,21 +11,18 @@ class MqttBridgeNode(Node):
     def __init__(self):
         super().__init__('mqtt_bridge_node')
 
-        self.declare_parameter('broker_host', '127.0.0.1')
+        self.declare_parameter('broker_host', 'test.mosquitto.org')
         self.declare_parameter('broker_port', 1883)
-
-        self.declare_parameter('mqtt_sensor_topic', 'smart_irrigation/data/sensor')
-        self.declare_parameter('mqtt_cmd_topic', 'smart_irrigation/cmd/pump')
-        self.declare_parameter('mqtt_pump_state_topic', 'smart_irrigation/data/pump_state')
-        self.declare_parameter('mqtt_config_test_topic', 'smart_irrigation/data/config_test')
+        self.declare_parameter('topic_prefix', 'smart_irrigation/dinhthi')
 
         self.broker_host = self.get_parameter('broker_host').value
         self.broker_port = int(self.get_parameter('broker_port').value)
 
-        self.mqtt_sensor_topic = self.get_parameter('mqtt_sensor_topic').value
-        self.mqtt_cmd_topic = self.get_parameter('mqtt_cmd_topic').value
-        self.mqtt_pump_state_topic = self.get_parameter('mqtt_pump_state_topic').value
-        self.mqtt_config_test_topic = self.get_parameter('mqtt_config_test_topic').value
+        prefix = str(self.get_parameter('topic_prefix').value).strip('/')
+        self.mqtt_sensor_topic = f'{prefix}/data/sensor'
+        self.mqtt_cmd_topic = f'{prefix}/cmd/pump'
+        self.mqtt_pump_state_topic = f'{prefix}/data/pump_state'
+        self.mqtt_config_test_topic = f'{prefix}/data/config_test'
 
         # ROS publishers for inbound MQTT messages.
         self.sensor_pub = self.create_publisher(String, 'irrigation/sensor_data', 10)
@@ -60,7 +57,8 @@ class MqttBridgeNode(Node):
         self.client.subscribe(self.mqtt_config_test_topic)
 
         self.get_logger().info(
-            f'MQTT bridge ready. IN: {self.mqtt_sensor_topic}, {self.mqtt_config_test_topic} | '
+            f'MQTT bridge ready. Broker={self.broker_host}:{self.broker_port}. '
+            f'IN: {self.mqtt_sensor_topic}, {self.mqtt_config_test_topic} | '
             f'OUT: {self.mqtt_cmd_topic}, {self.mqtt_pump_state_topic}'
         )
 

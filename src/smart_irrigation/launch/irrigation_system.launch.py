@@ -9,12 +9,14 @@ def generate_launch_description():
     use_mqtt = LaunchConfiguration('use_mqtt')
     use_serial = LaunchConfiguration('use_serial')
     mqtt_broker_host = LaunchConfiguration('mqtt_broker_host')
+    topic_prefix = LaunchConfiguration('topic_prefix')
     serial_port = LaunchConfiguration('serial_port')
 
     return LaunchDescription([
         DeclareLaunchArgument('use_mqtt', default_value='true'),
         DeclareLaunchArgument('use_serial', default_value='false'),
-        DeclareLaunchArgument('mqtt_broker_host', default_value='127.0.0.1'),
+        DeclareLaunchArgument('mqtt_broker_host', default_value='test.mosquitto.org'),
+        DeclareLaunchArgument('topic_prefix', default_value='smart_irrigation/dinhthi'),
         DeclareLaunchArgument('serial_port', default_value='/dev/ttyUSB0'),
         Node(package='smart_irrigation', executable='config_node', output='screen'),
         Node(package='smart_irrigation', executable='decision_node', output='screen'),
@@ -31,6 +33,11 @@ def generate_launch_description():
             executable='mqtt_bridge_node',
             output='screen',
             condition=IfCondition(use_mqtt),
-            parameters=[{'broker_host': mqtt_broker_host}],
+            parameters=[
+                {
+                    'broker_host': mqtt_broker_host,
+                    'topic_prefix': topic_prefix,
+                }
+            ],
         ),
     ])
