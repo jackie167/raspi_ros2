@@ -1,5 +1,9 @@
 let client = null;
 
+// Hardcoded broker settings as requested.
+const BROKER_WSS_URL = 'wss://b005c9ecb8674930857a11ff36fcd93c.s1.eu.hivemq.cloud:8884/mqtt';
+const TOPIC_PREFIX = 'smart_irrigation/dinhthi';
+
 const statusEl = document.getElementById('status');
 const moistureEl = document.getElementById('moisture');
 const tempEl = document.getElementById('temperature');
@@ -7,22 +11,19 @@ const humiEl = document.getElementById('humidity');
 const pumpStateEl = document.getElementById('pumpState');
 const rawEl = document.getElementById('raw');
 
-const brokerUrlEl = document.getElementById('brokerUrl');
 const brokerUserEl = document.getElementById('brokerUser');
 const brokerPassEl = document.getElementById('brokerPass');
-const topicPrefixEl = document.getElementById('topicPrefix');
 const rememberCfgEl = document.getElementById('rememberCfg');
 const autoConnectEl = document.getElementById('autoConnect');
 
-const STORAGE_KEY = 'smart_irrigation_dashboard_cfg_v1';
+const STORAGE_KEY = 'smart_irrigation_dashboard_cfg_v2';
 
 function setStatus(text) {
   statusEl.textContent = text;
 }
 
 function topic(name) {
-  const prefix = topicPrefixEl.value.trim().replace(/\/$/, '');
-  return `${prefix}/${name}`;
+  return TOPIC_PREFIX + '/' + name;
 }
 
 function loadConfig() {
@@ -31,10 +32,8 @@ function loadConfig() {
     if (!raw) return;
 
     const cfg = JSON.parse(raw);
-    brokerUrlEl.value = cfg.brokerUrl || brokerUrlEl.value;
     brokerUserEl.value = cfg.brokerUser || brokerUserEl.value;
     brokerPassEl.value = cfg.brokerPass || brokerPassEl.value;
-    topicPrefixEl.value = cfg.topicPrefix || topicPrefixEl.value;
     rememberCfgEl.checked = cfg.rememberCfg !== false;
     autoConnectEl.checked = cfg.autoConnect !== false;
   } catch {
@@ -44,10 +43,8 @@ function loadConfig() {
 
 function saveConfig() {
   const cfg = {
-    brokerUrl: brokerUrlEl.value.trim(),
     brokerUser: brokerUserEl.value.trim(),
     brokerPass: brokerPassEl.value,
-    topicPrefix: topicPrefixEl.value.trim(),
     rememberCfg: rememberCfgEl.checked,
     autoConnect: autoConnectEl.checked,
   };
@@ -77,7 +74,7 @@ function onMessage(topicName, payloadBytes) {
     pumpStateEl.textContent = payload;
   }
 
-  rawEl.textContent = `[${topicName}] ${payload}`;
+  rawEl.textContent = '[' + topicName + '] ' + payload;
 }
 
 function connect() {
@@ -88,7 +85,6 @@ function connect() {
     client = null;
   }
 
-  const url = brokerUrlEl.value.trim();
   const username = brokerUserEl.value.trim();
   const password = brokerPassEl.value;
 
@@ -98,11 +94,11 @@ function connect() {
     reconnectPeriod: 2000,
     username: username || undefined,
     password: password || undefined,
-    clientId: `web_${Math.random().toString(16).slice(2, 10)}`,
+    clientId: 'web_' + Math.random().toString(16).slice(2, 10),
   };
 
   setStatus('Connecting...');
-  client = mqtt.connect(url, options);
+  client = mqtt.connect(BROKER_WSS_URL, options);
 
   client.on('connect', () => {
     setStatus('Connected');
@@ -113,7 +109,7 @@ function connect() {
 
   client.on('message', onMessage);
   client.on('reconnect', () => setStatus('Reconnecting...'));
-  client.on('error', (err) => setStatus(`Error: ${err.message}`));
+  client.on('error', (err) => setStatus('Error: ' + err.message));
   client.on('close', () => setStatus('Disconnected'));
 }
 
