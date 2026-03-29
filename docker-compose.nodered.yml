@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  nodered:
+    build:
+      context: ./nodered
+    container_name: smart_irrigation_nodered
+    restart: unless-stopped
+    ports:
+      - "1880:1880"
+    volumes:
+      - ./nodered/flows.json:/data/flows.json
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
