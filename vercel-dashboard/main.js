@@ -11,6 +11,10 @@ const brokerUrlEl = document.getElementById('brokerUrl');
 const brokerUserEl = document.getElementById('brokerUser');
 const brokerPassEl = document.getElementById('brokerPass');
 const topicPrefixEl = document.getElementById('topicPrefix');
+const rememberCfgEl = document.getElementById('rememberCfg');
+const autoConnectEl = document.getElementById('autoConnect');
+
+const STORAGE_KEY = 'smart_irrigation_dashboard_cfg_v1';
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -19,6 +23,40 @@ function setStatus(text) {
 function topic(name) {
   const prefix = topicPrefixEl.value.trim().replace(/\/$/, '');
   return `${prefix}/${name}`;
+}
+
+function loadConfig() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+
+    const cfg = JSON.parse(raw);
+    brokerUrlEl.value = cfg.brokerUrl || brokerUrlEl.value;
+    brokerUserEl.value = cfg.brokerUser || brokerUserEl.value;
+    brokerPassEl.value = cfg.brokerPass || brokerPassEl.value;
+    topicPrefixEl.value = cfg.topicPrefix || topicPrefixEl.value;
+    rememberCfgEl.checked = cfg.rememberCfg !== false;
+    autoConnectEl.checked = cfg.autoConnect !== false;
+  } catch {
+    // Ignore corrupted local storage.
+  }
+}
+
+function saveConfig() {
+  const cfg = {
+    brokerUrl: brokerUrlEl.value.trim(),
+    brokerUser: brokerUserEl.value.trim(),
+    brokerPass: brokerPassEl.value,
+    topicPrefix: topicPrefixEl.value.trim(),
+    rememberCfg: rememberCfgEl.checked,
+    autoConnect: autoConnectEl.checked,
+  };
+
+  if (rememberCfgEl.checked) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+  } else {
+    localStorage.removeItem(STORAGE_KEY);
+  }
 }
 
 function onMessage(topicName, payloadBytes) {
@@ -43,6 +81,8 @@ function onMessage(topicName, payloadBytes) {
 }
 
 function connect() {
+  saveConfig();
+
   if (client) {
     client.end(true);
     client = null;
@@ -89,3 +129,8 @@ function publishPump(value) {
 document.getElementById('btnConnect').addEventListener('click', connect);
 document.getElementById('btnOn').addEventListener('click', () => publishPump('ON'));
 document.getElementById('btnOff').addEventListener('click', () => publishPump('OFF'));
+
+loadConfig();
+if (autoConnectEl.checked) {
+  connect();
+}
