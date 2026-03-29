@@ -66,7 +66,7 @@
     "name": "Sensor JSON",
     "topic": "smart_irrigation/dinhthi/data/sensor",
     "qos": "0",
-    "datatype": "auto-detect",
+    "datatype": "utf8",
     "broker": "b7a9f2019b2f0001",
     "nl": false,
     "rap": true,
@@ -90,18 +90,15 @@
   },
   {
     "id": "chg_moisture_01",
-    "type": "change",
+    "type": "function",
     "z": "f1c6e5b4c8a9d001",
-    "name": "soil_moisture -> payload",
-    "rules": [
-      {
-        "t": "set",
-        "p": "payload",
-        "pt": "msg",
-        "to": "payload.soil_moisture",
-        "tot": "msg"
-      }
-    ],
+    "name": "Parse moisture for gauge",
+    "func": "let p = msg.payload;\nif (typeof p === \"string\") {\n  try { p = JSON.parse(p); } catch (e) { return null; }\n}\nconst m = Number(p.soil_moisture);\nif (Number.isNaN(m)) return null;\nmsg.payload = m;\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
     "x": 620,
     "y": 100,
     "wires": [["ui_gauge_moisture_01"]]
