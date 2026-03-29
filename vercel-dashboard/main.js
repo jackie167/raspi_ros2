@@ -65,6 +65,31 @@ function saveConfig() {
   }
 }
 
+function extractPumpState(payload) {
+  const raw = String(payload || '').trim();
+  if (!raw) return '-';
+
+  // Plain payload case: "ON" / "OFF"
+  const upper = raw.toUpperCase();
+  if (upper === 'ON' || upper === 'OFF') {
+    return upper;
+  }
+
+  // JSON payload case
+  try {
+    const data = JSON.parse(raw);
+    const candidate = data.state || data.value || data.pump_state || data.command || '';
+    const state = String(candidate).toUpperCase().trim();
+    if (state === 'ON' || state === 'OFF') {
+      return state;
+    }
+  } catch {
+    // ignore parse errors
+  }
+
+  return raw;
+}
+
 function onMessage(topicName, payloadBytes) {
   const payload = new TextDecoder().decode(payloadBytes);
 
@@ -80,7 +105,7 @@ function onMessage(topicName, payloadBytes) {
   }
 
   if (topicName.endsWith('/data/pump_state')) {
-    pumpStateEl.textContent = payload;
+    pumpStateEl.textContent = extractPumpState(payload);
   }
 
   rawEl.textContent = '[' + topicName + '] ' + payload;
