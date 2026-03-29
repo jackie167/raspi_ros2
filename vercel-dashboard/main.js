@@ -23,6 +23,7 @@ const LAST_PUMP_STATE_KEY = 'smart_irrigation_last_pump_state_v1';
 const HISTORY_HOURS = 24;
 
 let hourlyHistory = [];
+let pendingPumpCommand = null;
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -292,7 +293,16 @@ function onMessage(topicName, payloadBytes) {
   }
 
   if (topicName.endsWith('/data/pump_state')) {
-    setPumpState(extractPumpState(payload));
+    const ackState = extractPumpState(payload);
+    setPumpState(ackState);
+    if (pendingPumpCommand && (ackState === 'ON' || ackState === 'OFF')) {
+      if (ackState === pendingPumpCommand) {
+        setStatus('ESP confirmed pump: ' + ackState);
+      } else {
+        setStatus('ESP state mismatch: expected ' + pendingPumpCommand + ', got ' + ackState);
+      }
+      pendingPumpCommand = null;
+    }
   }
 
   parseHistoryMessage(topicName, payload);
@@ -355,7 +365,8 @@ function publishPump(value) {
   }
 
   client.publish(topic('cmd/pump'), value, { qos: 0, retain: false });
-  setPumpState(value);
+  pendingPumpCommand = value;
+  setStatus('Command sent: ' + value + ' (waiting ESP ack)');
 }
 
 document.getElementById('btnConnect').addEventListener('click', connect);
