@@ -18,6 +18,7 @@ const rememberCfgEl = document.getElementById('rememberCfg');
 const autoConnectEl = document.getElementById('autoConnect');
 
 const STORAGE_KEY = 'smart_irrigation_dashboard_cfg_v2';
+const LAST_PUMP_STATE_KEY = 'smart_irrigation_last_pump_state_v1';
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -65,6 +66,22 @@ function saveConfig() {
   }
 }
 
+function setPumpState(state) {
+  const normalized = String(state || '').toUpperCase().trim();
+  if (normalized !== 'ON' && normalized !== 'OFF') {
+    return;
+  }
+  pumpStateEl.textContent = normalized;
+  localStorage.setItem(LAST_PUMP_STATE_KEY, normalized);
+}
+
+function loadLastPumpState() {
+  const state = localStorage.getItem(LAST_PUMP_STATE_KEY);
+  if (state === 'ON' || state === 'OFF') {
+    pumpStateEl.textContent = state;
+  }
+}
+
 function extractPumpState(payload) {
   const raw = String(payload || '').trim();
   if (!raw) return '-';
@@ -105,7 +122,7 @@ function onMessage(topicName, payloadBytes) {
   }
 
   if (topicName.endsWith('/data/pump_state')) {
-    pumpStateEl.textContent = extractPumpState(payload);
+    setPumpState(extractPumpState(payload));
   }
 
   rawEl.textContent = '[' + topicName + '] ' + payload;
@@ -166,6 +183,7 @@ function publishPump(value) {
   }
 
   client.publish(topic('cmd/pump'), value, { qos: 0, retain: false });
+  setPumpState(value);
 }
 
 document.getElementById('btnConnect').addEventListener('click', connect);
@@ -173,6 +191,7 @@ document.getElementById('btnOn').addEventListener('click', () => publishPump('ON
 document.getElementById('btnOff').addEventListener('click', () => publishPump('OFF'));
 
 loadConfig();
+loadLastPumpState();
 if (autoConnectEl.checked) {
   connect();
 }

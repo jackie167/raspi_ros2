@@ -44,9 +44,9 @@ class MqttClientWrapper:
         if self.client is not None:
             self.client.subscribe(topic)
 
-    def publish(self, topic, payload):
+    def publish(self, topic, payload, retain=False):
         if self.client is not None:
-            self.client.publish(topic, payload)
+            self.client.publish(topic, payload, retain=retain)
 
     def stop(self):
         if self.client is not None:

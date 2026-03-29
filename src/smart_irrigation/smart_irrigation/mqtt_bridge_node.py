@@ -120,7 +120,8 @@ class MqttBridgeNode(Node):
         if not state:
             return
 
-        self.client.publish(self.mqtt_pump_state_topic, state)
+        # Retain latest pump state so dashboard reconnect gets last known value immediately.
+        self.client.publish(self.mqtt_pump_state_topic, state, retain=True)
 
     def destroy_node(self):
         self.client.stop()
