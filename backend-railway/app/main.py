@@ -107,30 +107,45 @@ def hourly(hours: int = Query(default=24, ge=1, le=168)):
 
     db = SessionLocal()
     try:
-        stmt = (
-            select(
-                func.date_trunc('hour', SensorReading.created_at).label('bucket'),
-                func.avg(SensorReading.soil_moisture).label('avg_soil_moisture'),
-                func.count(SensorReading.id).label('count'),
-            )
+        rows = db.execute(
+            select(SensorReading.created_at, SensorReading.soil_moisture)
             .where(SensorReading.created_at >= since)
-            .group_by(func.date_trunc('hour', SensorReading.created_at))
-            .order_by(func.date_trunc('hour', SensorReading.created_at).asc())
-        )
-        rows = db.execute(stmt).all()
+            .order_by(SensorReading.created_at.asc())
+        ).all()
     finally:
         db.close()
 
+    buckets = {}
+    for created_at, moisture in rows:
+        if created_at is None or moisture is None:
+            continue
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        hour_bucket = created_at.replace(minute=0, second=0, microsecond=0)
+        item = buckets.get(hour_bucket)
+        if item is None:
+            buckets[hour_bucket] = {
+                'sum': float(moisture),
+                'count': 1,
+            }
+        else:
+            item['sum'] += float(moisture)
+            item['count'] += 1
+
+    items = []
+    for bucket in sorted(buckets.keys()):
+        agg = buckets[bucket]
+        items.append(
+            {
+                'bucket': bucket.isoformat(),
+                'avg_soil_moisture': agg['sum'] / agg['count'],
+                'count': agg['count'],
+            }
+        )
+
     return {
         'hours': hours,
-        'items': [
-            {
-                'bucket': row.bucket.isoformat(),
-                'avg_soil_moisture': float(row.avg_soil_moisture),
-                'count': int(row.count),
-            }
-            for row in rows
-        ],
+        'items': items,
     }
 
 
