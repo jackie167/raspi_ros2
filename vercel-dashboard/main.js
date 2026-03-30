@@ -11,6 +11,7 @@ const statusEl = document.getElementById('status');
 const moistureEl = document.getElementById('moisture');
 const tempEl = document.getElementById('temperature');
 const humiEl = document.getElementById('humidity');
+const sampleTimeEl = document.getElementById('sampleTime');
 const pumpStateEl = document.getElementById('pumpState');
 const pumpAckEl = document.getElementById('pumpAck');
 const moistureChartEl = document.getElementById('moistureChart');
@@ -29,6 +30,7 @@ let sampleSeries = []; // [{idx, ts_ms, moisture}]
 let pendingPumpCommand = null;
 let lastDbSamplesRefreshMs = 0;
 let hasConnectedOnce = false;
+let lastSensorTsMs = 0;
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -41,6 +43,35 @@ function setBrokerCardVisible(visible) {
 
 function topic(name) {
   return TOPIC_PREFIX + '/' + name;
+}
+
+function formatSampleTime(tsMs, source) {
+  if (Number.isFinite(tsMs) === false || tsMs <= 0) return '-';
+  const d = new Date(tsMs);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const yy = String(d.getFullYear());
+  return hh + ':' + mm + ':' + ss + ' ' + dd + '/' + mo + '/' + yy + ' (' + source + ')';
+}
+
+function setLiveSensorValues(args) {
+  const moisture = Number(args.moisture);
+  const temperature = Number(args.temperature);
+  const humidity = Number(args.humidity);
+  const tsMs = Number(args.tsMs);
+  const source = args.source || 'sensor';
+
+  if (Number.isFinite(moisture)) moistureEl.textContent = String(moisture);
+  if (Number.isFinite(temperature)) tempEl.textContent = String(temperature);
+  if (Number.isFinite(humidity)) humiEl.textContent = String(humidity);
+
+  if (Number.isFinite(tsMs) && tsMs > 0) {
+    lastSensorTsMs = tsMs;
+    if (sampleTimeEl) sampleTimeEl.textContent = formatSampleTime(tsMs, source);
+  }
 }
 
 function loadConfig() {
@@ -225,6 +256,31 @@ async function refreshDbSensorSamples() {
   }
 }
 
+
+async function refreshLatestFromDb() {
+  try {
+    const base = RAILWAY_API_BASE.replace(/\/$/, '');
+    const res = await fetch(base + '/api/latest', { method: 'GET' });
+    if (!res.ok) return;
+
+    const data = await res.json();
+    const sensor = data && data.sensor ? data.sensor : null;
+    if (!sensor) return;
+
+    const tsMs = Date.parse(sensor.created_at || '');
+    if (Number.isFinite(tsMs) && tsMs < lastSensorTsMs) return;
+
+    setLiveSensorValues({
+      moisture: Number(sensor.soil_moisture),
+      temperature: Number(sensor.temperature),
+      humidity: Number(sensor.humidity),
+      tsMs: Number.isFinite(tsMs) ? tsMs : Date.now(),
+      source: 'DB',
+    });
+  } catch {
+    // Ignore DB latest errors.
+  }
+}
 function renderDbCommandRows(items) {
   if (!dbAckListEl) return;
   if (!Array.isArray(items) || items.length === 0) {
@@ -266,14 +322,28 @@ function onMessage(topicName, payloadBytes) {
     try {
       const data = JSON.parse(payload);
       const moisture = Number(data.soil_moisture);
-      moistureEl.textContent = Number.isFinite(moisture) ? String(moisture) : '-';
-      tempEl.textContent = String(data.temperature ?? '-');
-      humiEl.textContent = String(data.humidity ?? '-');
+      const temperature = Number(data.temperature);
+      const humidity = Number(data.humidity);
+
+      let tsMs = Date.now();
+      if (Number.isFinite(Number(data.ts))) {
+        const tsNum = Number(data.ts);
+        tsMs = tsNum < 1e12 ? tsNum * 1000 : tsNum;
+      }
+
+      setLiveSensorValues({
+        moisture,
+        temperature,
+        humidity,
+        tsMs,
+        source: 'MQTT',
+      });
 
       const now = Date.now();
       if (now - lastDbSamplesRefreshMs > 5000) {
         lastDbSamplesRefreshMs = now;
         refreshDbSensorSamples();
+        refreshLatestFromDb();
       }
     } catch {
       // Ignore parse errors.
@@ -369,9 +439,11 @@ loadConfig();
 loadLastPumpState();
 renderSampleChart();
 refreshDbSensorSamples();
+refreshLatestFromDb();
 refreshDbDebug();
 setInterval(() => {
   refreshDbSensorSamples();
+  refreshLatestFromDb();
   refreshDbDebug();
 }, 10000);
 if (autoConnectEl.checked) {
