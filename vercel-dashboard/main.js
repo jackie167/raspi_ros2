@@ -3,7 +3,7 @@ let client = null;
 // Hardcoded broker settings as requested.
 const BROKER_WSS_URL = 'wss://b005c9ecb8674930857a11ff36fcd93c.s1.eu.hivemq.cloud:8884/mqtt';
 const TOPIC_PREFIX = 'smart_irrigation/dinhthi';
-const RAILWAY_API_BASE = 'https://raspiros2.up.railway.app';
+const RAILWAY_API_BASE = localStorage.getItem('railway_api_base') || 'https://raspiros2-production.up.railway.app';
 
 const brokerCardEl = document.getElementById('brokerCard');
 const statusEl = document.getElementById('status');
