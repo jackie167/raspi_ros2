@@ -28,6 +28,7 @@ const LAST_PUMP_STATE_KEY = 'smart_irrigation_last_pump_state_v1';
 let sampleSeries = []; // [{idx, ts_ms, moisture}]
 let pendingPumpCommand = null;
 let lastDbSamplesRefreshMs = 0;
+let hasConnectedOnce = false;
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -317,10 +318,11 @@ function connect() {
   };
 
   setStatus('Connecting...');
-  setBrokerCardVisible(true);
+  if (!hasConnectedOnce) setBrokerCardVisible(true);
   client = mqtt.connect(BROKER_WSS_URL, options);
 
   client.on('connect', () => {
+    hasConnectedOnce = true;
     setStatus('Connected');
     setBrokerCardVisible(false);
     client.subscribe(topic('data/sensor'));
@@ -331,22 +333,22 @@ function connect() {
   client.on('message', onMessage);
   client.on('reconnect', () => {
     setStatus('Reconnecting...');
-    setBrokerCardVisible(true);
+    if (!hasConnectedOnce) setBrokerCardVisible(true);
   });
   client.on('error', (err) => {
     setStatus('Error: ' + err.message);
-    setBrokerCardVisible(true);
+    if (!hasConnectedOnce) setBrokerCardVisible(true);
   });
   client.on('close', () => {
-    setStatus('Disconnected');
-    setBrokerCardVisible(true);
+    setStatus(hasConnectedOnce ? 'Reconnecting...' : 'Disconnected');
+    if (!hasConnectedOnce) setBrokerCardVisible(true);
   });
 }
 
 function publishPump(value) {
   if (!client || !client.connected) {
     setStatus('Not connected');
-    setBrokerCardVisible(true);
+    if (!hasConnectedOnce) setBrokerCardVisible(true);
     return;
   }
 
