@@ -4,6 +4,7 @@ let client = null;
 const BROKER_WSS_URL = 'wss://b005c9ecb8674930857a11ff36fcd93c.s1.eu.hivemq.cloud:8884/mqtt';
 const TOPIC_PREFIX = 'smart_irrigation/dinhthi';
 const RAILWAY_API_BASE = localStorage.getItem('railway_api_base') || 'https://raspiros2-production.up.railway.app';
+const SAMPLE_LIMIT = 120;
 
 const brokerCardEl = document.getElementById('brokerCard');
 const statusEl = document.getElementById('status');
@@ -23,22 +24,18 @@ const autoConnectEl = document.getElementById('autoConnect');
 
 const STORAGE_KEY = 'smart_irrigation_dashboard_cfg_v2';
 const LAST_PUMP_STATE_KEY = 'smart_irrigation_last_pump_state_v1';
-const HISTORY_HOURS = 24;
 
-let hourlyHistory = []; // sparse {hour: epochHour, avg}
+let sampleSeries = []; // [{idx, ts_ms, moisture}]
 let pendingPumpCommand = null;
-let lastDbChartRefreshMs = 0;
+let lastDbSamplesRefreshMs = 0;
 
 function setStatus(text) {
   statusEl.textContent = text;
 }
 
 function setBrokerCardVisible(visible) {
-  if (visible) {
-    brokerCardEl.classList.remove('hidden');
-  } else {
-    brokerCardEl.classList.add('hidden');
-  }
+  if (visible) brokerCardEl.classList.remove('hidden');
+  else brokerCardEl.classList.add('hidden');
 }
 
 function topic(name) {
@@ -49,7 +46,6 @@ function loadConfig() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
-
     const cfg = JSON.parse(raw);
     brokerUserEl.value = cfg.brokerUser || brokerUserEl.value;
     brokerPassEl.value = cfg.brokerPass || brokerPassEl.value;
@@ -67,98 +63,43 @@ function saveConfig() {
     rememberCfg: rememberCfgEl.checked,
     autoConnect: autoConnectEl.checked,
   };
-
-  if (rememberCfgEl.checked) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
-  } else {
-    localStorage.removeItem(STORAGE_KEY);
-  }
+  if (rememberCfgEl.checked) localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+  else localStorage.removeItem(STORAGE_KEY);
 }
 
 function setPumpAck(value) {
-  if (!pumpAckEl) return;
-  pumpAckEl.textContent = String(value);
+  if (pumpAckEl) pumpAckEl.textContent = String(value);
 }
 
 function setPumpState(state) {
   const normalized = String(state || '').toUpperCase().trim();
-  if (normalized !== 'ON' && normalized !== 'OFF') {
-    return;
-  }
+  if (normalized !== 'ON' && normalized !== 'OFF') return;
   pumpStateEl.textContent = normalized;
   localStorage.setItem(LAST_PUMP_STATE_KEY, normalized);
 }
 
 function loadLastPumpState() {
   const state = localStorage.getItem(LAST_PUMP_STATE_KEY);
-  if (state === 'ON' || state === 'OFF') {
-    pumpStateEl.textContent = state;
-  }
+  if (state === 'ON' || state === 'OFF') pumpStateEl.textContent = state;
 }
 
 function extractPumpState(payload) {
   const raw = String(payload || '').trim();
   if (!raw) return '-';
-
   const upper = raw.toUpperCase();
-  if (upper === 'ON' || upper === 'OFF') {
-    return upper;
-  }
-
+  if (upper === 'ON' || upper === 'OFF') return upper;
   try {
     const data = JSON.parse(raw);
     const candidate = data.state || data.value || data.pump_state || data.command || '';
     const state = String(candidate).toUpperCase().trim();
-    if (state === 'ON' || state === 'OFF') {
-      return state;
-    }
+    if (state === 'ON' || state === 'OFF') return state;
   } catch {
     // Ignore parse errors.
   }
-
   return raw;
 }
 
-function hourStartMs(tsMs) {
-  const d = new Date(tsMs);
-  d.setMinutes(0, 0, 0);
-  return d.getTime();
-}
-
-function buildChartSeries() {
-  const nowHourMs = hourStartMs(Date.now());
-  const minHourMs = nowHourMs - (HISTORY_HOURS - 1) * 3600000;
-
-  const sparse = new Map(hourlyHistory.map((item) => [item.hour * 3600000, Number(item.avg)]));
-
-  const points = [];
-  let lastValue = null;
-  for (let i = 0; i < HISTORY_HOURS; i++) {
-    const hourMs = minHourMs + i * 3600000;
-    let value = null;
-
-    if (sparse.has(hourMs)) {
-      value = sparse.get(hourMs);
-      if (Number.isFinite(value)) {
-        lastValue = value;
-      } else {
-        value = null;
-      }
-    } else if (lastValue !== null) {
-      // Fill missing hour with previous known value.
-      value = lastValue;
-    }
-
-    points.push({
-      hourMs,
-      label: String(new Date(hourMs).getHours()).padStart(2, '0') + ':00',
-      value,
-    });
-  }
-  return points;
-}
-
-function renderMoistureChart() {
+function renderSampleChart() {
   if (!moistureChartEl) return;
 
   const rect = moistureChartEl.getBoundingClientRect();
@@ -195,95 +136,100 @@ function renderMoistureChart() {
     ctx.fillText(String(val), 8, y + 4);
   }
 
-  const series = buildChartSeries();
-  const step = (right - left) / (HISTORY_HOURS - 1);
-
-  ctx.fillStyle = '#64748b';
-  for (let i = 0; i < series.length; i += 6) {
-    const x = left + i * step;
-    ctx.fillText(series[i].label, x - 14, height - 8);
+  if (!Array.isArray(sampleSeries) || sampleSeries.length === 0) {
+    moistureChartMetaEl.textContent = 'No sensor samples from DB yet';
+    return;
   }
 
+  const n = sampleSeries.length;
+  const step = n > 1 ? (right - left) / (n - 1) : 0;
   const yFromValue = (v) => bottom - (Math.max(0, Math.min(100, v)) / 100) * (bottom - top);
+
+  const tickStep = Math.max(1, Math.floor(n / 4));
+  ctx.fillStyle = '#64748b';
+  for (let i = 0; i < n; i += tickStep) {
+    const x = left + i * step;
+    const label = 'S' + String(sampleSeries[i].idx);
+    ctx.fillText(label, x - 14, height - 8);
+  }
+  if ((n - 1) % tickStep !== 0) {
+    const x = left + (n - 1) * step;
+    ctx.fillText('S' + String(sampleSeries[n - 1].idx), x - 14, height - 8);
+  }
 
   ctx.strokeStyle = '#2563eb';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  let started = false;
-  for (let i = 0; i < series.length; i++) {
-    const point = series[i];
-    if (point.value === null) continue;
-
+  for (let i = 0; i < n; i++) {
+    const p = sampleSeries[i];
     const x = left + i * step;
-    const y = yFromValue(point.value);
-    if (!started) {
-      ctx.moveTo(x, y);
-      started = true;
-    } else {
-      ctx.lineTo(x, y);
-    }
+    const y = yFromValue(p.moisture);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
   }
   ctx.stroke();
 
   ctx.fillStyle = '#2563eb';
-  for (let i = 0; i < series.length; i++) {
-    const point = series[i];
-    if (point.value === null) continue;
+  for (let i = 0; i < n; i++) {
+    const p = sampleSeries[i];
     const x = left + i * step;
-    const y = yFromValue(point.value);
+    const y = yFromValue(p.moisture);
     ctx.beginPath();
     ctx.arc(x, y, 2.5, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  const hasData = series.some((p) => p.value !== null);
-  if (!hasData) {
-    moistureChartMetaEl.textContent = 'Waiting DB hourly data...';
-    return;
-  }
-
-  const last = [...series].reverse().find((p) => p.value !== null);
-  moistureChartMetaEl.textContent = 'Last DB hourly value: ' + last.value.toFixed(1) + '% at ' + last.label;
+  const first = sampleSeries[0];
+  const last = sampleSeries[n - 1];
+  const t1 = new Date(first.ts_ms);
+  const t2 = new Date(last.ts_ms);
+  const fromLabel = String(t1.getHours()).padStart(2, '0') + ':' + String(t1.getMinutes()).padStart(2, '0');
+  const toLabel = String(t2.getHours()).padStart(2, '0') + ':' + String(t2.getMinutes()).padStart(2, '0');
+  moistureChartMetaEl.textContent =
+    'DB samples: ' + n +
+    ' | Last: ' + last.moisture.toFixed(1) + '%' +
+    ' | Range: S' + String(first.idx) + ' -> S' + String(last.idx) +
+    ' (' + fromLabel + ' - ' + toLabel + ')';
 }
 
-async function refreshDbHourlyHistory() {
+async function refreshDbSensorSamples() {
   try {
-    const url = RAILWAY_API_BASE.replace(/\/$/, '') + '/api/history/hourly?hours=' + HISTORY_HOURS;
+    const base = RAILWAY_API_BASE.replace(/\/$/, '');
+    const url = base + '/api/sensor/samples?limit=' + SAMPLE_LIMIT;
     const res = await fetch(url, { method: 'GET' });
     if (!res.ok) {
-      moistureChartMetaEl.textContent = 'DB history API error: ' + res.status;
+      moistureChartMetaEl.textContent = 'DB sample API error: ' + res.status;
       return;
     }
 
     const data = await res.json();
     const items = Array.isArray(data.items) ? data.items : [];
-
-    hourlyHistory = items
-      .map((x) => {
-        const ts = Date.parse(x.bucket);
-        if (!Number.isFinite(ts)) return null;
-        const hour = Math.floor(ts / 3600000);
-        const avg = Number(x.avg_soil_moisture);
-        if (!Number.isFinite(hour) || !Number.isFinite(avg)) return null;
-        return { hour, avg };
+    sampleSeries = items
+      .map((x, i) => {
+        const tsRaw = Date.parse(x.created_at || '');
+        const fallbackTs = Date.now() - (items.length - i) * 1000;
+        const ts = Number.isFinite(tsRaw) ? tsRaw : fallbackTs;
+        const moistureRaw = Number(x.soil_moisture);
+        const moisture = Number.isFinite(moistureRaw)
+          ? moistureRaw
+          : Number(x?.raw_payload?.soil_moisture);
+        if (!Number.isFinite(moisture)) return null;
+        return { idx: i + 1, ts_ms: ts, moisture };
       })
-      .filter(Boolean)
-      .sort((a, b) => a.hour - b.hour);
+      .filter((x) => x !== null);
 
-    renderMoistureChart();
+    renderSampleChart();
   } catch (err) {
-    moistureChartMetaEl.textContent = 'Cannot load DB history: ' + err.message;
+    moistureChartMetaEl.textContent = 'Cannot load DB samples: ' + err.message;
   }
 }
 
 function renderDbCommandRows(items) {
   if (!dbAckListEl) return;
-
   if (!Array.isArray(items) || items.length === 0) {
     dbAckListEl.textContent = 'No command rows yet';
     return;
   }
-
   const lines = items.map((x) => {
     const matched = x.matched === true ? 'true' : (x.matched === false ? 'false' : 'pending');
     return [
@@ -293,13 +239,11 @@ function renderDbCommandRows(items) {
       'matched=' + matched,
     ].join(' | ');
   });
-
   dbAckListEl.textContent = lines.join('\n');
 }
 
 async function refreshDbDebug() {
   if (!dbAckListEl) return;
-
   try {
     const url = RAILWAY_API_BASE.replace(/\/$/, '') + '/api/pump/commands?limit=12';
     const res = await fetch(url, { method: 'GET' });
@@ -326,9 +270,9 @@ function onMessage(topicName, payloadBytes) {
       humiEl.textContent = String(data.humidity ?? '-');
 
       const now = Date.now();
-      if (now - lastDbChartRefreshMs > 5000) {
-        lastDbChartRefreshMs = now;
-        refreshDbHourlyHistory();
+      if (now - lastDbSamplesRefreshMs > 5000) {
+        lastDbSamplesRefreshMs = now;
+        refreshDbSensorSamples();
       }
     } catch {
       // Ignore parse errors.
@@ -417,15 +361,15 @@ document.getElementById('btnConnect').addEventListener('click', connect);
 document.getElementById('btnOn').addEventListener('click', () => publishPump('ON'));
 document.getElementById('btnOff').addEventListener('click', () => publishPump('OFF'));
 document.getElementById('btnRefreshDb').addEventListener('click', refreshDbDebug);
-window.addEventListener('resize', renderMoistureChart);
+window.addEventListener('resize', renderSampleChart);
 
 loadConfig();
 loadLastPumpState();
-renderMoistureChart();
-refreshDbHourlyHistory();
+renderSampleChart();
+refreshDbSensorSamples();
 refreshDbDebug();
 setInterval(() => {
-  refreshDbHourlyHistory();
+  refreshDbSensorSamples();
   refreshDbDebug();
 }, 10000);
 if (autoConnectEl.checked) {

@@ -100,6 +100,34 @@ def latest():
     }
 
 
+
+
+@app.get('/api/sensor/samples')
+def sensor_samples(limit: int = Query(default=120, ge=10, le=1000)):
+    require_db()
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            select(SensorReading)
+            .order_by(SensorReading.created_at.desc())
+            .limit(limit)
+        ).scalars().all()
+    finally:
+        db.close()
+
+    rows = list(reversed(rows))
+    return {
+        'items': [
+            {
+                'soil_moisture': row.soil_moisture,
+                'temperature': row.temperature,
+                'humidity': row.humidity,
+                'created_at': row.created_at.isoformat(),
+            }
+            for row in rows
+        ]
+    }
+
 @app.get('/api/history/hourly')
 def hourly(hours: int = Query(default=24, ge=1, le=168)):
     require_db()
