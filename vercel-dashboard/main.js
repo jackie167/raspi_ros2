@@ -181,12 +181,13 @@ function renderSampleChart() {
   ctx.fillStyle = '#64748b';
   for (let i = 0; i < n; i += tickStep) {
     const x = left + i * step;
-    const label = 'S' + String(sampleSeries[i].idx);
+    const h = new Date(sampleSeries[i].ts_ms).getHours();
+    const label = String(h);
     ctx.fillText(label, x - 14, height - 8);
   }
   if ((n - 1) % tickStep !== 0) {
     const x = left + (n - 1) * step;
-    ctx.fillText('S' + String(sampleSeries[n - 1].idx), x - 14, height - 8);
+    ctx.fillText(String(new Date(sampleSeries[n - 1].ts_ms).getHours()), x - 14, height - 8);
   }
 
   ctx.strokeStyle = '#2563eb';
