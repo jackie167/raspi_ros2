@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -102,7 +103,7 @@ def latest():
 @app.get('/api/history/hourly')
 def hourly(hours: int = Query(default=24, ge=1, le=168)):
     require_db()
-    since = func.now() - text(f"INTERVAL '{int(hours)} hours'")
+    since = datetime.now(timezone.utc) - timedelta(hours=int(hours))
 
     db = SessionLocal()
     try:
