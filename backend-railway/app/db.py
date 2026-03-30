@@ -6,8 +6,18 @@ from app.config import settings
 
 Base = declarative_base()
 
-if settings.database_url:
-    engine = create_engine(settings.database_url, pool_pre_ping=True)
+
+def normalize_database_url(url: str) -> str:
+    raw = (url or '').strip()
+    if raw.startswith('postgresql://'):
+        return raw.replace('postgresql://', 'postgresql+psycopg://', 1)
+    return raw
+
+
+DATABASE_URL = normalize_database_url(settings.database_url)
+
+if DATABASE_URL:
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 else:
     engine = None

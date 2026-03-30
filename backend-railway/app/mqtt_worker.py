@@ -24,19 +24,23 @@ class MqttIngestWorker:
             LOGGER.warning('MQTT_HOST missing, skip MQTT ingest worker')
             return
 
-        self.client = mqtt.Client()
-        self.client.on_connect = self.on_connect
-        self.client.on_message = self.on_message
+        try:
+            self.client = mqtt.Client()
+            self.client.on_connect = self.on_connect
+            self.client.on_message = self.on_message
 
-        if settings.mqtt_username:
-            self.client.username_pw_set(settings.mqtt_username, settings.mqtt_password)
+            if settings.mqtt_username:
+                self.client.username_pw_set(settings.mqtt_username, settings.mqtt_password)
 
-        if settings.mqtt_use_tls:
-            self.client.tls_set()
+            if settings.mqtt_use_tls:
+                self.client.tls_set()
 
-        self.client.connect(settings.mqtt_host, settings.mqtt_port, keepalive=60)
-        self.client.loop_start()
-        LOGGER.info('MQTT ingest worker started')
+            self.client.connect(settings.mqtt_host, settings.mqtt_port, keepalive=60)
+            self.client.loop_start()
+            LOGGER.info('MQTT ingest worker started')
+        except Exception as exc:
+            LOGGER.exception('MQTT worker start failed: %s', exc)
+            self.client = None
 
     def stop(self) -> None:
         if self.client is None:
