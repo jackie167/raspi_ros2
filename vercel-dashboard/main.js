@@ -25,46 +25,9 @@ const STORAGE_KEY = 'smart_irrigation_dashboard_cfg_v2';
 const LAST_PUMP_STATE_KEY = 'smart_irrigation_last_pump_state_v1';
 const HISTORY_HOURS = 24;
 
-let hourlyHistory = [];
+let hourlyHistory = []; // sparse {hour: epochHour, avg}
 let pendingPumpCommand = null;
-
-function renderDbCommandRows(items) {
-  if (!dbAckListEl) return;
-
-  if (!Array.isArray(items) || items.length === 0) {
-    dbAckListEl.textContent = 'No command rows yet';
-    return;
-  }
-
-  const lines = items.map((x) => {
-    const matched = x.matched === true ? 'true' : (x.matched === false ? 'false' : 'pending');
-    return [
-      x.created_at || '-',
-      'cmd=' + (x.command || '-'),
-      'ack=' + (x.ack_state || '-'),
-      'matched=' + matched,
-    ].join(' | ');
-  });
-
-  dbAckListEl.textContent = lines.join('\n');
-}
-
-async function refreshDbDebug() {
-  if (!dbAckListEl) return;
-
-  try {
-    const url = RAILWAY_API_BASE.replace(/\/$/, '') + '/api/pump/commands?limit=12';
-    const res = await fetch(url, { method: 'GET' });
-    if (!res.ok) {
-      dbAckListEl.textContent = 'API error: ' + res.status;
-      return;
-    }
-    const data = await res.json();
-    renderDbCommandRows(data.items || []);
-  } catch (err) {
-    dbAckListEl.textContent = 'Cannot load DB debug: ' + err.message;
-  }
-}
+let lastDbChartRefreshMs = 0;
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -162,52 +125,34 @@ function hourStartMs(tsMs) {
   return d.getTime();
 }
 
-function resetHourlyHistory() {
-  hourlyHistory = [];
-  renderMoistureChart();
-}
-
-function upsertHourlyHistoryEntry(hourEpoch, avgValue, countValue) {
-  const hour = Number(hourEpoch);
-  const avg = Number(avgValue);
-  const count = Number(countValue);
-  if (!Number.isFinite(hour) || !Number.isFinite(avg)) return;
-
-  const idx = hourlyHistory.findIndex((item) => item.hour === hour);
-  const item = {
-    hour,
-    avg,
-    count: Number.isFinite(count) ? count : 1,
-  };
-
-  if (idx >= 0) {
-    hourlyHistory[idx] = item;
-  } else {
-    hourlyHistory.push(item);
-  }
-
-  hourlyHistory.sort((a, b) => a.hour - b.hour);
-  const nowHourEpoch = Math.floor(Date.now() / 3600000);
-  const minHourEpoch = nowHourEpoch - (HISTORY_HOURS - 1);
-  hourlyHistory = hourlyHistory.filter((x) => x.hour >= minHourEpoch && x.hour <= nowHourEpoch);
-
-  renderMoistureChart();
-}
-
 function buildChartSeries() {
   const nowHourMs = hourStartMs(Date.now());
   const minHourMs = nowHourMs - (HISTORY_HOURS - 1) * 3600000;
-  const valueByHourMs = new Map(
-    hourlyHistory.map((item) => [item.hour * 3600000, item.avg]),
-  );
+
+  const sparse = new Map(hourlyHistory.map((item) => [item.hour * 3600000, Number(item.avg)]));
 
   const points = [];
+  let lastValue = null;
   for (let i = 0; i < HISTORY_HOURS; i++) {
     const hourMs = minHourMs + i * 3600000;
+    let value = null;
+
+    if (sparse.has(hourMs)) {
+      value = sparse.get(hourMs);
+      if (Number.isFinite(value)) {
+        lastValue = value;
+      } else {
+        value = null;
+      }
+    } else if (lastValue !== null) {
+      // Fill missing hour with previous known value.
+      value = lastValue;
+    }
+
     points.push({
       hourMs,
       label: String(new Date(hourMs).getHours()).padStart(2, '0') + ':00',
-      value: valueByHourMs.has(hourMs) ? valueByHourMs.get(hourMs) : null,
+      value,
     });
   }
   return points;
@@ -267,9 +212,8 @@ function renderMoistureChart() {
   let started = false;
   for (let i = 0; i < series.length; i++) {
     const point = series[i];
-    if (point.value === null) {
-      continue;
-    }
+    if (point.value === null) continue;
+
     const x = left + i * step;
     const y = yFromValue(point.value);
     if (!started) {
@@ -294,59 +238,80 @@ function renderMoistureChart() {
 
   const hasData = series.some((p) => p.value !== null);
   if (!hasData) {
-    moistureChartMetaEl.textContent = 'Waiting hourly history from MQTT...';
+    moistureChartMetaEl.textContent = 'Waiting DB hourly data...';
     return;
   }
 
   const last = [...series].reverse().find((p) => p.value !== null);
-  moistureChartMetaEl.textContent = 'Last MQTT hourly avg: ' + last.value.toFixed(1) + '% at ' + last.label;
+  moistureChartMetaEl.textContent = 'Last DB hourly value: ' + last.value.toFixed(1) + '% at ' + last.label;
 }
 
-function applyLiveSensorToChart(moisture, tsSec) {
-  const value = Number(moisture);
-  if (!Number.isFinite(value)) return;
+async function refreshDbHourlyHistory() {
+  try {
+    const url = RAILWAY_API_BASE.replace(/\/$/, '') + '/api/history/hourly?hours=' + HISTORY_HOURS;
+    const res = await fetch(url, { method: 'GET' });
+    if (!res.ok) {
+      moistureChartMetaEl.textContent = 'DB history API error: ' + res.status;
+      return;
+    }
 
-  const ts = Number(tsSec);
-  const sec = Number.isFinite(ts) ? ts : Math.floor(Date.now() / 1000);
-  const hourEpoch = Math.floor(sec / 3600);
+    const data = await res.json();
+    const items = Array.isArray(data.items) ? data.items : [];
 
-  const idx = hourlyHistory.findIndex((item) => item.hour === hourEpoch);
-  if (idx >= 0) {
-    const current = hourlyHistory[idx];
-    const currentCount = Number.isFinite(Number(current.count)) ? Number(current.count) : 0;
-    const nextCount = currentCount + 1;
-    const nextAvg = ((Number(current.avg) * currentCount) + value) / nextCount;
-    hourlyHistory[idx] = { hour: hourEpoch, avg: nextAvg, count: nextCount };
-  } else {
-    hourlyHistory.push({ hour: hourEpoch, avg: value, count: 1 });
+    hourlyHistory = items
+      .map((x) => {
+        const ts = Date.parse(x.bucket);
+        if (!Number.isFinite(ts)) return null;
+        const hour = Math.floor(ts / 3600000);
+        const avg = Number(x.avg_soil_moisture);
+        if (!Number.isFinite(hour) || !Number.isFinite(avg)) return null;
+        return { hour, avg };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.hour - b.hour);
+
+    renderMoistureChart();
+  } catch (err) {
+    moistureChartMetaEl.textContent = 'Cannot load DB history: ' + err.message;
+  }
+}
+
+function renderDbCommandRows(items) {
+  if (!dbAckListEl) return;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    dbAckListEl.textContent = 'No command rows yet';
+    return;
   }
 
-  hourlyHistory.sort((a, b) => a.hour - b.hour);
-  const nowHourEpoch = Math.floor(Date.now() / 3600000);
-  const minHourEpoch = nowHourEpoch - (HISTORY_HOURS - 1);
-  hourlyHistory = hourlyHistory.filter((x) => x.hour >= minHourEpoch && x.hour <= nowHourEpoch);
+  const lines = items.map((x) => {
+    const matched = x.matched === true ? 'true' : (x.matched === false ? 'false' : 'pending');
+    return [
+      x.created_at || '-',
+      'cmd=' + (x.command || '-'),
+      'ack=' + (x.ack_state || '-'),
+      'matched=' + matched,
+    ].join(' | ');
+  });
 
-  renderMoistureChart();
+  dbAckListEl.textContent = lines.join('\n');
 }
 
-function parseHistoryMessage(topicName, payload) {
-  const historyPrefix = topic('history/soil_moisture/hourly/');
-  if (!topicName.startsWith(historyPrefix)) return;
-
-  const hourFromTopic = Number(topicName.slice(historyPrefix.length));
+async function refreshDbDebug() {
+  if (!dbAckListEl) return;
 
   try {
-    const data = JSON.parse(payload);
-    const hourEpoch = Number.isFinite(Number(data.hour_epoch)) ? Number(data.hour_epoch) : hourFromTopic;
-    const avg = data.avg_soil_moisture;
-    const count = data.count;
-    upsertHourlyHistoryEntry(hourEpoch, avg, count);
-    return;
-  } catch {
-    // Fallback below if payload is non-JSON.
+    const url = RAILWAY_API_BASE.replace(/\/$/, '') + '/api/pump/commands?limit=12';
+    const res = await fetch(url, { method: 'GET' });
+    if (!res.ok) {
+      dbAckListEl.textContent = 'API error: ' + res.status;
+      return;
+    }
+    const data = await res.json();
+    renderDbCommandRows(data.items || []);
+  } catch (err) {
+    dbAckListEl.textContent = 'Cannot load DB debug: ' + err.message;
   }
-
-  upsertHourlyHistoryEntry(hourFromTopic, Number(payload), 1);
 }
 
 function onMessage(topicName, payloadBytes) {
@@ -359,7 +324,12 @@ function onMessage(topicName, payloadBytes) {
       moistureEl.textContent = Number.isFinite(moisture) ? String(moisture) : '-';
       tempEl.textContent = String(data.temperature ?? '-');
       humiEl.textContent = String(data.humidity ?? '-');
-      applyLiveSensorToChart(moisture, data.ts);
+
+      const now = Date.now();
+      if (now - lastDbChartRefreshMs > 5000) {
+        lastDbChartRefreshMs = now;
+        refreshDbHourlyHistory();
+      }
     } catch {
       // Ignore parse errors.
     }
@@ -380,8 +350,6 @@ function onMessage(topicName, payloadBytes) {
       refreshDbDebug();
     }
   }
-
-  parseHistoryMessage(topicName, payload);
 }
 
 function connect() {
@@ -411,11 +379,9 @@ function connect() {
   client.on('connect', () => {
     setStatus('Connected');
     setBrokerCardVisible(false);
-    resetHourlyHistory();
     client.subscribe(topic('data/sensor'));
     client.subscribe(topic('data/pump_state'));
     client.subscribe(topic('data/config_test'));
-    client.subscribe(topic('history/soil_moisture/hourly/+'));
   });
 
   client.on('message', onMessage);
@@ -456,8 +422,12 @@ window.addEventListener('resize', renderMoistureChart);
 loadConfig();
 loadLastPumpState();
 renderMoistureChart();
+refreshDbHourlyHistory();
 refreshDbDebug();
-setInterval(refreshDbDebug, 10000);
+setInterval(() => {
+  refreshDbHourlyHistory();
+  refreshDbDebug();
+}, 10000);
 if (autoConnectEl.checked) {
   connect();
 }
