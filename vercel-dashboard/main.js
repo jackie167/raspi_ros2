@@ -4,7 +4,7 @@ let client = null;
 const BROKER_WSS_URL = 'wss://b005c9ecb8674930857a11ff36fcd93c.s1.eu.hivemq.cloud:8884/mqtt';
 const TOPIC_PREFIX = 'smart_irrigation/dinhthi';
 const RAILWAY_API_BASE = localStorage.getItem('railway_api_base') || 'https://raspiros2-production.up.railway.app';
-const SAMPLE_LIMIT = 120;
+const HISTORY_HOURS = 24;
 
 const brokerCardEl = document.getElementById('brokerCard');
 const statusEl = document.getElementById('status');
@@ -169,7 +169,7 @@ function renderSampleChart() {
   }
 
   if (!Array.isArray(sampleSeries) || sampleSeries.length === 0) {
-    moistureChartMetaEl.textContent = 'No sensor samples from DB yet';
+    moistureChartMetaEl.textContent = 'No 24h history from DB yet';
     return;
   }
 
@@ -177,17 +177,16 @@ function renderSampleChart() {
   const step = n > 1 ? (right - left) / (n - 1) : 0;
   const yFromValue = (v) => bottom - (Math.max(0, Math.min(100, v)) / 100) * (bottom - top);
 
-  const tickStep = Math.max(1, Math.floor(n / 4));
+  const tickStep = Math.max(1, Math.floor(n / 6));
   ctx.fillStyle = '#64748b';
   for (let i = 0; i < n; i += tickStep) {
     const x = left + i * step;
-    const h = new Date(sampleSeries[i].ts_ms).getHours();
-    const label = String(h);
-    ctx.fillText(label, x - 14, height - 8);
+    const label = String(new Date(sampleSeries[i].ts_ms).getHours());
+    ctx.fillText(label, x - 6, height - 8);
   }
   if ((n - 1) % tickStep !== 0) {
     const x = left + (n - 1) * step;
-    ctx.fillText(String(new Date(sampleSeries[n - 1].ts_ms).getHours()), x - 14, height - 8);
+    ctx.fillText(String(new Date(sampleSeries[n - 1].ts_ms).getHours()), x - 6, height - 8);
   }
 
   ctx.strokeStyle = '#2563eb';
@@ -214,48 +213,76 @@ function renderSampleChart() {
 
   const first = sampleSeries[0];
   const last = sampleSeries[n - 1];
-  const t1 = new Date(first.ts_ms);
-  const t2 = new Date(last.ts_ms);
-  const fromLabel = String(t1.getHours()).padStart(2, '0') + ':' + String(t1.getMinutes()).padStart(2, '0');
-  const toLabel = String(t2.getHours()).padStart(2, '0') + ':' + String(t2.getMinutes()).padStart(2, '0');
+  const fromHour = String(new Date(first.ts_ms).getHours());
+  const toHour = String(new Date(last.ts_ms).getHours());
   moistureChartMetaEl.textContent =
-    'DB samples: ' + n +
-    ' | Last: ' + last.moisture.toFixed(1) + '%' +
-    ' | Range: S' + String(first.idx) + ' -> S' + String(last.idx) +
-    ' (' + fromLabel + ' - ' + toLabel + ')';
+    '24h window | Last avg: ' + last.moisture.toFixed(1) + '% | Hours: ' + fromHour + ' -> ' + toHour;
 }
 
 async function refreshDbSensorSamples() {
   try {
     const base = RAILWAY_API_BASE.replace(/\/$/, '');
-    const url = base + '/api/sensor/samples?limit=' + SAMPLE_LIMIT;
+    const url = base + '/api/history/hourly?hours=' + HISTORY_HOURS;
     const res = await fetch(url, { method: 'GET' });
     if (!res.ok) {
-      moistureChartMetaEl.textContent = 'DB sample API error: ' + res.status;
+      moistureChartMetaEl.textContent = 'DB 24h API error: ' + res.status;
       return;
     }
 
     const data = await res.json();
     const items = Array.isArray(data.items) ? data.items : [];
-    sampleSeries = items
-      .map((x, i) => {
-        const tsRaw = Date.parse(x.created_at || '');
-        const fallbackTs = Date.now() - (items.length - i) * 1000;
-        const ts = Number.isFinite(tsRaw) ? tsRaw : fallbackTs;
-        const moistureRaw = Number(x.soil_moisture);
-        const moisture = Number.isFinite(moistureRaw)
-          ? moistureRaw
-          : Number(x?.raw_payload?.soil_moisture);
-        if (!Number.isFinite(moisture)) return null;
-        return { idx: i + 1, ts_ms: ts, moisture };
-      })
-      .filter((x) => x !== null);
+    const bucketMap = new Map();
+    for (const it of items) {
+      const ts = Date.parse(it.bucket || '');
+      const avg = Number(it.avg_soil_moisture);
+      if (!Number.isFinite(ts) || !Number.isFinite(avg)) continue;
+      const d = new Date(ts);
+      d.setMinutes(0, 0, 0);
+      bucketMap.set(d.getTime(), avg);
+    }
 
+    const nowHour = new Date();
+    nowHour.setMinutes(0, 0, 0);
+    const endHourMs = nowHour.getTime();
+    const startHourMs = endHourMs - (HISTORY_HOURS - 1) * 3600000;
+
+    const series = [];
+    let lastKnown = null;
+    for (let i = 0; i < HISTORY_HOURS; i++) {
+      const hourMs = startHourMs + i * 3600000;
+      let value = null;
+      if (bucketMap.has(hourMs)) {
+        value = Number(bucketMap.get(hourMs));
+        if (Number.isFinite(value)) lastKnown = value;
+      } else if (lastKnown !== null) {
+        value = lastKnown;
+      }
+      series.push({ idx: i + 1, ts_ms: hourMs, moisture: value });
+    }
+
+    const firstKnown = series.find((x) => Number.isFinite(x.moisture));
+    if (!firstKnown) {
+      sampleSeries = [];
+      renderSampleChart();
+      return;
+    }
+
+    let carry = firstKnown.moisture;
+    for (let i = 0; i < series.length; i++) {
+      if (!Number.isFinite(series[i].moisture)) {
+        series[i].moisture = carry;
+      } else {
+        carry = series[i].moisture;
+      }
+    }
+
+    sampleSeries = series;
     renderSampleChart();
   } catch (err) {
-    moistureChartMetaEl.textContent = 'Cannot load DB samples: ' + err.message;
+    moistureChartMetaEl.textContent = 'Cannot load DB 24h history: ' + err.message;
   }
 }
+
 
 
 async function refreshLatestFromDb() {
