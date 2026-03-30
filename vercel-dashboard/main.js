@@ -222,7 +222,7 @@ function renderSampleChart() {
 async function refreshDbSensorSamples() {
   try {
     const base = RAILWAY_API_BASE.replace(/\/$/, '');
-    const url = base + '/api/sensor/samples?limit=2000';
+    const url = base + '/api/sensor/samples?limit=1000';
     const res = await fetch(url, { method: 'GET' });
     if (!res.ok) {
       moistureChartMetaEl.textContent = 'DB raw API error: ' + res.status;
