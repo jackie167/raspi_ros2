@@ -89,3 +89,32 @@ button {
   font-size: 12px;
   min-height: 120px;
 }
+
+.chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.range-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.range-btn {
+  margin-top: 0;
+  margin-right: 0;
+  padding: 6px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+}
+
+.range-btn.active {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-color: #93c5fd;
+}

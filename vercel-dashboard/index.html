@@ -36,7 +36,13 @@
       <p><strong>Last sample time:</strong> <span id="sampleTime">-</span></p>
       <p><strong>Pump state:</strong> <span id="pumpState">-</span> &nbsp; <strong>Ack:</strong> <span id="pumpAck">-</span></p>
 
-      <h3>Soil moisture (24h)</h3>
+      <div class="chart-head">
+        <h3 id="chartTitle">Soil moisture (24h)</h3>
+        <div class="range-toggle">
+          <button id="btn7h" type="button" class="range-btn">7h</button>
+          <button id="btn24h" type="button" class="range-btn active">24h</button>
+        </div>
+      </div>
       <div class="chart-wrap">
         <canvas id="moistureChart" width="820" height="240"></canvas>
       </div>

@@ -4,7 +4,8 @@ let client = null;
 const BROKER_WSS_URL = 'wss://b005c9ecb8674930857a11ff36fcd93c.s1.eu.hivemq.cloud:8884/mqtt';
 const TOPIC_PREFIX = 'smart_irrigation/dinhthi';
 const RAILWAY_API_BASE = localStorage.getItem('railway_api_base') || 'https://raspiros2-production.up.railway.app';
-const HISTORY_HOURS = 24;
+const DEFAULT_HISTORY_HOURS = 24;
+const HISTORY_HOURS_OPTIONS = [7, 24];
 
 const brokerCardEl = document.getElementById('brokerCard');
 const statusEl = document.getElementById('status');
@@ -16,6 +17,9 @@ const pumpStateEl = document.getElementById('pumpState');
 const pumpAckEl = document.getElementById('pumpAck');
 const moistureChartEl = document.getElementById('moistureChart');
 const moistureChartMetaEl = document.getElementById('moistureChartMeta');
+const chartTitleEl = document.getElementById('chartTitle');
+const btn7hEl = document.getElementById('btn7h');
+const btn24hEl = document.getElementById('btn24h');
 const dbAckListEl = document.getElementById('dbAckList');
 
 const brokerUserEl = document.getElementById('brokerUser');
@@ -25,12 +29,14 @@ const autoConnectEl = document.getElementById('autoConnect');
 
 const STORAGE_KEY = 'smart_irrigation_dashboard_cfg_v2';
 const LAST_PUMP_STATE_KEY = 'smart_irrigation_last_pump_state_v1';
+const CHART_RANGE_HOURS_KEY = 'smart_irrigation_chart_hours_v1';
 
 let sampleSeries = []; // [{idx, ts_ms, moisture}]
 let pendingPumpCommand = null;
 let lastDbSamplesRefreshMs = 0;
 let hasConnectedOnce = false;
 let lastSensorTsMs = 0;
+let selectedHistoryHours = DEFAULT_HISTORY_HOURS;
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -43,6 +49,29 @@ function setBrokerCardVisible(visible) {
 
 function topic(name) {
   return TOPIC_PREFIX + '/' + name;
+}
+
+function updateChartRangeUI() {
+  if (chartTitleEl) chartTitleEl.textContent = 'Soil moisture (' + String(selectedHistoryHours) + 'h)';
+  if (btn7hEl) btn7hEl.classList.toggle('active', selectedHistoryHours === 7);
+  if (btn24hEl) btn24hEl.classList.toggle('active', selectedHistoryHours === 24);
+}
+
+function loadChartRange() {
+  const raw = localStorage.getItem(CHART_RANGE_HOURS_KEY);
+  const parsed = Number(raw);
+  if (HISTORY_HOURS_OPTIONS.includes(parsed)) selectedHistoryHours = parsed;
+  else selectedHistoryHours = DEFAULT_HISTORY_HOURS;
+  updateChartRangeUI();
+}
+
+function setChartRangeHours(hours) {
+  const next = Number(hours);
+  if (!HISTORY_HOURS_OPTIONS.includes(next)) return;
+  selectedHistoryHours = next;
+  localStorage.setItem(CHART_RANGE_HOURS_KEY, String(next));
+  updateChartRangeUI();
+  refreshDbSensorSamples();
 }
 
 function formatSampleTime(tsMs, source) {
@@ -169,7 +198,7 @@ function renderSampleChart() {
   }
 
   if (!Array.isArray(sampleSeries) || sampleSeries.length === 0) {
-    moistureChartMetaEl.textContent = 'No 24h history from DB yet';
+    moistureChartMetaEl.textContent = 'No ' + String(selectedHistoryHours) + 'h raw data from DB yet';
     return;
   }
 
@@ -216,7 +245,7 @@ function renderSampleChart() {
   const fromHour = String(new Date(first.ts_ms).getHours());
   const toHour = String(new Date(last.ts_ms).getHours());
   moistureChartMetaEl.textContent =
-    '24h raw samples | Points: ' + n + ' | Last: ' + last.moisture.toFixed(1) + '% | Hours: ' + fromHour + ' -> ' + toHour;
+    String(selectedHistoryHours) + 'h raw samples | Points: ' + n + ' | Last: ' + last.moisture.toFixed(1) + '% | Hours: ' + fromHour + ' -> ' + toHour;
 }
 
 async function refreshDbSensorSamples() {
@@ -231,7 +260,7 @@ async function refreshDbSensorSamples() {
 
     const data = await res.json();
     const items = Array.isArray(data.items) ? data.items : [];
-    const sinceMs = Date.now() - HISTORY_HOURS * 3600000;
+    const sinceMs = Date.now() - selectedHistoryHours * 3600000;
 
     const series = items
       .map((x) => {
@@ -430,9 +459,12 @@ document.getElementById('btnConnect').addEventListener('click', connect);
 document.getElementById('btnOn').addEventListener('click', () => publishPump('ON'));
 document.getElementById('btnOff').addEventListener('click', () => publishPump('OFF'));
 document.getElementById('btnRefreshDb').addEventListener('click', refreshDbDebug);
+if (btn7hEl) btn7hEl.addEventListener('click', () => setChartRangeHours(7));
+if (btn24hEl) btn24hEl.addEventListener('click', () => setChartRangeHours(24));
 window.addEventListener('resize', renderSampleChart);
 
 loadConfig();
+loadChartRange();
 loadLastPumpState();
 renderSampleChart();
 refreshDbSensorSamples();
