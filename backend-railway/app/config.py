@@ -26,5 +26,9 @@ class Settings:
     def mqtt_pump_state_topic(self) -> str:
         return f'{self.mqtt_topic_prefix}/data/pump_state'
 
+    @property
+    def mqtt_pump_cmd_topic(self) -> str:
+        return f'{self.mqtt_topic_prefix}/cmd/pump'
+
 
 settings = Settings()

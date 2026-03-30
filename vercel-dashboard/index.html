@@ -47,6 +47,13 @@
       <button id="btnOn" class="ok">Pump ON</button>
       <button id="btnOff" class="bad">Pump OFF</button>
     </section>
+
+    <section class="card">
+      <h2>DB Debug (Railway/Neon)</h2>
+      <p class="chart-meta">Recent command vs ack from Neon DB</p>
+      <pre id="dbAckList" class="mono-box">Loading...</pre>
+      <button id="btnRefreshDb">Refresh DB</button>
+    </section>
   </main>
 
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>

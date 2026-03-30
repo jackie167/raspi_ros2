@@ -3,6 +3,7 @@ let client = null;
 // Hardcoded broker settings as requested.
 const BROKER_WSS_URL = 'wss://b005c9ecb8674930857a11ff36fcd93c.s1.eu.hivemq.cloud:8884/mqtt';
 const TOPIC_PREFIX = 'smart_irrigation/dinhthi';
+const RAILWAY_API_BASE = 'https://raspiros2.up.railway.app';
 
 const brokerCardEl = document.getElementById('brokerCard');
 const statusEl = document.getElementById('status');
@@ -13,6 +14,7 @@ const pumpStateEl = document.getElementById('pumpState');
 const pumpAckEl = document.getElementById('pumpAck');
 const moistureChartEl = document.getElementById('moistureChart');
 const moistureChartMetaEl = document.getElementById('moistureChartMeta');
+const dbAckListEl = document.getElementById('dbAckList');
 
 const brokerUserEl = document.getElementById('brokerUser');
 const brokerPassEl = document.getElementById('brokerPass');
@@ -25,6 +27,44 @@ const HISTORY_HOURS = 24;
 
 let hourlyHistory = [];
 let pendingPumpCommand = null;
+
+function renderDbCommandRows(items) {
+  if (!dbAckListEl) return;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    dbAckListEl.textContent = 'No command rows yet';
+    return;
+  }
+
+  const lines = items.map((x) => {
+    const matched = x.matched === true ? 'true' : (x.matched === false ? 'false' : 'pending');
+    return [
+      x.created_at || '-',
+      'cmd=' + (x.command || '-'),
+      'ack=' + (x.ack_state || '-'),
+      'matched=' + matched,
+    ].join(' | ');
+  });
+
+  dbAckListEl.textContent = lines.join('\n');
+}
+
+async function refreshDbDebug() {
+  if (!dbAckListEl) return;
+
+  try {
+    const url = RAILWAY_API_BASE.replace(/\/$/, '') + '/api/pump/commands?limit=12';
+    const res = await fetch(url, { method: 'GET' });
+    if (!res.ok) {
+      dbAckListEl.textContent = 'API error: ' + res.status;
+      return;
+    }
+    const data = await res.json();
+    renderDbCommandRows(data.items || []);
+  } catch (err) {
+    dbAckListEl.textContent = 'Cannot load DB debug: ' + err.message;
+  }
+}
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -262,7 +302,6 @@ function renderMoistureChart() {
   moistureChartMetaEl.textContent = 'Last MQTT hourly avg: ' + last.value.toFixed(1) + '% at ' + last.label;
 }
 
-
 function applyLiveSensorToChart(moisture, tsSec) {
   const value = Number(moisture);
   if (!Number.isFinite(value)) return;
@@ -291,7 +330,7 @@ function applyLiveSensorToChart(moisture, tsSec) {
 }
 
 function parseHistoryMessage(topicName, payload) {
-  const historyPrefix = topic('history/soil_moisture/hourly/') ;
+  const historyPrefix = topic('history/soil_moisture/hourly/');
   if (!topicName.startsWith(historyPrefix)) return;
 
   const hourFromTopic = Number(topicName.slice(historyPrefix.length));
@@ -338,6 +377,7 @@ function onMessage(topicName, payloadBytes) {
         setStatus('ESP state mismatch: expected ' + pendingPumpCommand + ', got ' + ackState);
       }
       pendingPumpCommand = null;
+      refreshDbDebug();
     }
   }
 
@@ -404,16 +444,20 @@ function publishPump(value) {
   pendingPumpCommand = value;
   setPumpAck('pending');
   setStatus('Command sent: ' + value + ' (waiting ESP ack)');
+  refreshDbDebug();
 }
 
 document.getElementById('btnConnect').addEventListener('click', connect);
 document.getElementById('btnOn').addEventListener('click', () => publishPump('ON'));
 document.getElementById('btnOff').addEventListener('click', () => publishPump('OFF'));
+document.getElementById('btnRefreshDb').addEventListener('click', refreshDbDebug);
 window.addEventListener('resize', renderMoistureChart);
 
 loadConfig();
 loadLastPumpState();
 renderMoistureChart();
+refreshDbDebug();
+setInterval(refreshDbDebug, 10000);
 if (autoConnectEl.checked) {
   connect();
 }

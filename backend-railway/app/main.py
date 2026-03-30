@@ -1,11 +1,12 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select, text
 
 from app.config import settings
 from app.db import SessionLocal, init_db
-from app.models import PumpStateEvent, SensorReading
+from app.models import PumpCommandEvent, PumpStateEvent, SensorReading
 from app.mqtt_worker import MqttIngestWorker
 
 
@@ -30,7 +31,14 @@ async def lifespan(app: FastAPI):
         worker.stop()
 
 
-app = FastAPI(title='Smart Irrigation Backend', version='1.0.0', lifespan=lifespan)
+app = FastAPI(title='Smart Irrigation Backend', version='1.1.0', lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=['*'],
+    allow_credentials=False,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
 
 
 @app.get('/health')
@@ -56,6 +64,9 @@ def latest():
         pump = db.execute(
             select(PumpStateEvent).order_by(PumpStateEvent.created_at.desc()).limit(1)
         ).scalar_one_or_none()
+        cmd = db.execute(
+            select(PumpCommandEvent).order_by(PumpCommandEvent.created_at.desc()).limit(1)
+        ).scalar_one_or_none()
     finally:
         db.close()
 
@@ -75,6 +86,15 @@ def latest():
             'ack_state': pump.ack_state,
             'matched': pump.matched,
             'created_at': pump.created_at.isoformat(),
+        },
+        'command': None
+        if cmd is None
+        else {
+            'command': cmd.command,
+            'ack_state': cmd.ack_state,
+            'matched': cmd.matched,
+            'created_at': cmd.created_at.isoformat(),
+            'ack_at': cmd.ack_at.isoformat() if cmd.ack_at else None,
         },
     }
 
@@ -132,6 +152,34 @@ def pump_acks(limit: int = Query(default=20, ge=1, le=200)):
                 'ack_state': row.ack_state,
                 'matched': row.matched,
                 'created_at': row.created_at.isoformat(),
+                'raw_payload': row.raw_payload,
+            }
+            for row in rows
+        ]
+    }
+
+
+@app.get('/api/pump/commands')
+def pump_commands(limit: int = Query(default=20, ge=1, le=200)):
+    require_db()
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            select(PumpCommandEvent)
+            .order_by(PumpCommandEvent.created_at.desc())
+            .limit(limit)
+        ).scalars().all()
+    finally:
+        db.close()
+
+    return {
+        'items': [
+            {
+                'command': row.command,
+                'ack_state': row.ack_state,
+                'matched': row.matched,
+                'created_at': row.created_at.isoformat(),
+                'ack_at': row.ack_at.isoformat() if row.ack_at else None,
                 'raw_payload': row.raw_payload,
             }
             for row in rows

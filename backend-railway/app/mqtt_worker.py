@@ -2,10 +2,11 @@ import json
 import logging
 
 import paho.mqtt.client as mqtt
+from sqlalchemy import select
 
 from app.config import settings
 from app.db import SessionLocal
-from app.models import PumpStateEvent, SensorReading
+from app.models import PumpCommandEvent, PumpStateEvent, SensorReading
 
 
 LOGGER = logging.getLogger('mqtt_worker')
@@ -53,6 +54,7 @@ class MqttIngestWorker:
         LOGGER.info('MQTT connected rc=%s', reason_code)
         client.subscribe(settings.mqtt_sensor_topic)
         client.subscribe(settings.mqtt_pump_state_topic)
+        client.subscribe(settings.mqtt_pump_cmd_topic)
 
     def on_message(self, client, userdata, msg):
         payload_str = msg.payload.decode('utf-8', errors='ignore').strip()
@@ -65,6 +67,10 @@ class MqttIngestWorker:
 
         if msg.topic == settings.mqtt_pump_state_topic:
             self.handle_pump_state(payload_str)
+            return
+
+        if msg.topic == settings.mqtt_pump_cmd_topic:
+            self.handle_pump_command(payload_str)
             return
 
     def handle_sensor(self, payload_str: str) -> None:
@@ -101,6 +107,30 @@ class MqttIngestWorker:
         finally:
             session.close()
 
+    def handle_pump_command(self, payload_str: str) -> None:
+        command = payload_str.strip().upper()
+        data = {'raw': payload_str}
+
+        if command not in {'ON', 'OFF'}:
+            try:
+                parsed = json.loads(payload_str)
+                command = str(parsed.get('command', parsed.get('state', payload_str))).upper()
+                data = parsed if isinstance(parsed, dict) else {'raw': payload_str}
+            except json.JSONDecodeError:
+                pass
+
+        session = SessionLocal()
+        try:
+            row = PumpCommandEvent(
+                command=command,
+                raw_payload=data,
+                matched=None,
+            )
+            session.add(row)
+            session.commit()
+        finally:
+            session.close()
+
     def handle_pump_state(self, payload_str: str) -> None:
         state = payload_str.upper()
         data = {'raw': payload_str}
@@ -113,18 +143,32 @@ class MqttIngestWorker:
             except json.JSONDecodeError:
                 state = payload_str.upper()
 
-        matched = None
-        if state in {'ON', 'OFF'}:
-            matched = True
+        matched = True if state in {'ON', 'OFF'} else None
 
         session = SessionLocal()
         try:
-            row = PumpStateEvent(
+            ack_row = PumpStateEvent(
                 ack_state=state,
                 matched=matched,
                 raw_payload=data,
             )
-            session.add(row)
+            session.add(ack_row)
+            session.flush()
+
+            pending_cmd = session.execute(
+                select(PumpCommandEvent)
+                .where(PumpCommandEvent.matched.is_(None))
+                .order_by(PumpCommandEvent.created_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+
+            if pending_cmd is not None:
+                pending_cmd.ack_state = state
+                pending_cmd.ack_event_id = ack_row.id
+                pending_cmd.ack_at = ack_row.created_at
+                pending_cmd.matched = (state == pending_cmd.command)
+                ack_row.matched = pending_cmd.matched
+
             session.commit()
         finally:
             session.close()

@@ -82,6 +82,7 @@ railway up
 - Latest: `https://<railway-domain>/api/latest`
 - Hourly history: `https://<railway-domain>/api/history/hourly?hours=24`
 - Pump ack list: `https://<railway-domain>/api/pump/acks?limit=20`
+- Pump command+ack list: `https://<railway-domain>/api/pump/commands?limit=20`
 
 Notes:
 - Backend auto-subscribes MQTT topics:
